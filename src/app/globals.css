@@ -401,6 +401,11 @@ h2 em {
   font-size: 13px;
   line-height: 1.9;
 }
+.how-intro a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 3px;
+}
 .steps {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

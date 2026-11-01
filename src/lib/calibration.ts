@@ -11,6 +11,8 @@ export type Observation = {
   timeMs: number;
   /** Aim point proximity to the target center, from 0 to 100. */
   centerAccuracy?: number;
+  /** Fitts-style target difficulty in bits, estimated from angular distance and width. */
+  difficultyBits?: number;
   angularErrorDeg: number | null;
   corrections: number;
   overshot: boolean;
@@ -42,6 +44,12 @@ export function observationScore(o: Observation): number {
   if (o.mode === 'tracking-duration')
     return Math.max(0, Math.min(1, (o.centerAccuracy ?? 0) / 100));
   if (!o.hit) return 0;
+  if (typeof o.difficultyBits === 'number' && Number.isFinite(o.difficultyBits)) {
+    // Normalize throughput against 5.5 bits completed in 0.4 s, the upper
+    // task-difficulty / typical-time pairing in the FPS targeting study.
+    const throughput = o.difficultyBits / (Math.max(100, o.timeMs) / 1000);
+    return Math.max(0, Math.min(1, throughput / 13.75));
+  }
   const speed = Math.max(0, Math.min(1, (1500 - o.timeMs) / 1200));
   const error = o.angularErrorDeg === null ? 1 : Math.max(0, 1 - o.angularErrorDeg / 18);
   const correction = Math.max(0, 1 - o.corrections * 0.35);

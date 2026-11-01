@@ -525,6 +525,13 @@ export default function Home() {
     const elapsed = performance.now() - trialStart;
     // Camera yaw is negative when turning toward a target on the right.
     const angular = (-Math.atan2(target.position[0], 10) * 180) / Math.PI;
+    const targetDistanceDeg =
+      (Math.atan2(Math.hypot(target.position[0], target.position[1]), 10) * 180) / Math.PI;
+    const targetWidthDeg = (2 * Math.atan2(target.size, 10) * 180) / Math.PI;
+    const difficultyBits =
+      mode.id === 'horizontal' || mode.id === 'micro' || mode.id === 'wide'
+        ? Math.log2(targetDistanceDeg / targetWidthDeg + 1)
+        : undefined;
     const moved = angleRef.current - startAngle;
     const error = Math.abs(angular - moved);
     const wasOver =
@@ -536,6 +543,7 @@ export default function Home() {
       mode: mode.id,
       timeMs: elapsed,
       centerAccuracy: timedTracking ? centerAccuracy : hit ? centerAccuracy : 0,
+      difficultyBits,
       angularErrorDeg: scoredHit && !isTracking ? error : null,
       corrections: scoredHit && !isTracking && error > 3 ? 1 : 0,
       overshot: scoredHit && !isTracking && wasOver,
@@ -1189,9 +1197,14 @@ export default function Home() {
               <p className="how-intro">
                 Start with your current CS2 sensitivity and DPI. SENS/LAB compares five nearby
                 settings—from 80% to 120% of your current sensitivity—while keeping your DPI fixed.
-                At each setting, you complete four aim exercises and a 20-second tracking run. We
-                score hit rate, speed, aim error, corrections, and how close you keep the crosshair
-                to the moving target; each exercise contributes equally to the comparison.
+                At each setting, you complete four click exercises and a 20-second tracking run.
+                Stationary flick scores use Fitts-style throughput: target difficulty, based on
+                angular distance and width, divided by hit time; misses score zero. Moving tracking
+                is measured separately by how closely you follow the target. Candidate settings
+                use the same target sequence for a fair comparison.{' '}
+                <a href="https://arxiv.org/abs/2203.12050" target="_blank" rel="noreferrer">
+                  Read the FPS sensitivity study.
+                </a>
                 <br />
                 <br />
                 The highest-scoring setting is a data-backed starting point for your own practice,
