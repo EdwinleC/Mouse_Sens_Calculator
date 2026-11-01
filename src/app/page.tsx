@@ -81,15 +81,23 @@ function Target({
   position,
   size,
   color = '#fff',
+  centerMarker = false,
 }: {
   position: [number, number, number];
   size: number;
   color?: string;
+  centerMarker?: boolean;
 }) {
   return (
     <mesh position={position}>
       <sphereGeometry args={[size, 16, 16]} />
       <meshBasicMaterial color={color} />
+      {centerMarker && (
+        <mesh position={[0, 0, size + 0.003]} raycast={() => {}}>
+          <sphereGeometry args={[size * 0.095, 10, 10]} />
+          <meshBasicMaterial color="#ff3b30" depthTest={false} />
+        </mesh>
+      )}
       <mesh position={[0, 0, -0.03]} raycast={() => {}}>
         <sphereGeometry args={[size * 1.5, 12, 12]} />
         <meshBasicMaterial color={color} transparent opacity={0.12} />
@@ -310,7 +318,7 @@ function Scene({
     const state = latest.current;
     if (targetRef.current && !state.paused && state.tracking) {
       trackingElapsed.current += delta;
-      const elapsed = trackingElapsed.current;
+      const elapsed = trackingElapsed.current * (state.trackingOnly ? 1.35 : 1);
       targetRef.current.position.x = trackingOrigin.current.x + Math.sin(elapsed * 1.25) * 1.4;
       targetRef.current.position.y = trackingOrigin.current.y + Math.sin(elapsed * 0.8) * 0.45;
       if (state.trackingOnly) {
@@ -337,7 +345,7 @@ function Scene({
       </mesh>
       {target && (
         <group ref={targetRef}>
-          <Target position={[0, 0, 0]} size={target.size} />
+          <Target position={[0, 0, 0]} size={target.size} centerMarker />
         </group>
       )}
     </>
@@ -383,6 +391,36 @@ export default function Home() {
     [copied, setCopied] = useState(false);
   const angleRef = useRef(0);
   const { settings, trials, setSettings, addTrial, clearTrials } = useCalibration();
+  const [dpiInput, setDpiInput] = useState(String(settings.dpi));
+  const [sensInput, setSensInput] = useState(String(settings.sens));
+  const [pollingInput, setPollingInput] = useState(String(settings.polling));
+  const [refreshInput, setRefreshInput] = useState(String(settings.refresh));
+  useEffect(() => {
+    setDpiInput(String(settings.dpi));
+  }, [settings.dpi]);
+  useEffect(() => {
+    setSensInput(String(settings.sens));
+  }, [settings.sens]);
+  useEffect(() => {
+    setPollingInput(String(settings.polling));
+  }, [settings.polling]);
+  useEffect(() => {
+    setRefreshInput(String(settings.refresh));
+  }, [settings.refresh]);
+  const commitSetting = (
+    key: 'dpi' | 'sens' | 'polling' | 'refresh',
+    value: string,
+    setInput: (value: string) => void,
+    min: number,
+    max: number,
+  ) => {
+    const parsed = Number(value);
+    if (value.trim() && Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+      setSettings({ ...settings, [key]: parsed });
+    } else {
+      setInput(String(settings[key]));
+    }
+  };
   const sensList = useMemo(() => candidates(settings.sens), [settings.sens]);
   const testSens =
     candidateOrder.length > 0
@@ -1030,47 +1068,54 @@ export default function Home() {
               <label>
                 MOUSE DPI
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   min="100"
                   max="6400"
-                  value={settings.dpi}
-                  onChange={(e) => setSettings({ ...settings, dpi: Number(e.target.value) })}
+                  value={dpiInput}
+                  onChange={(e) => setDpiInput(e.target.value)}
+                  onBlur={() => commitSetting('dpi', dpiInput, setDpiInput, 100, 6400)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                 />
                 <small>Check your mouse manufacturer software. Browsers cannot detect DPI.</small>
               </label>
               <label>
                 CS2 SENSITIVITY
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   min="0.01"
                   max="20"
-                  step="0.01"
-                  value={settings.sens}
-                  onChange={(e) => setSettings({ ...settings, sens: Number(e.target.value) })}
+                  value={sensInput}
+                  onChange={(e) => setSensInput(e.target.value)}
+                  onBlur={() => commitSetting('sens', sensInput, setSensInput, 0.01, 20)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                 />
                 <small>Your current in-game sensitivity is the baseline.</small>
               </label>
               <label>
                 POLLING RATE <span className="optional">OPTIONAL</span>
-                <select
-                  value={settings.polling}
-                  onChange={(e) => setSettings({ ...settings, polling: Number(e.target.value) })}
-                >
-                  {[125, 250, 500, 1000, 2000, 4000, 8000].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={pollingInput}
+                  onChange={(e) => setPollingInput(e.target.value)}
+                  onBlur={() => commitSetting('polling', pollingInput, setPollingInput, 125, 8000)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  aria-label="Mouse polling rate in hertz"
+                />
               </label>
               <label>
                 REFRESH RATE <span className="optional">OPTIONAL</span>
-                <select
-                  value={settings.refresh}
-                  onChange={(e) => setSettings({ ...settings, refresh: Number(e.target.value) })}
-                >
-                  {[60, 75, 120, 144, 165, 240, 360].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={refreshInput}
+                  onChange={(e) => setRefreshInput(e.target.value)}
+                  onBlur={() => commitSetting('refresh', refreshInput, setRefreshInput, 30, 1000)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  aria-label="Display refresh rate in hertz"
+                />
               </label>
             </div>
             <div className="calc-strip">
