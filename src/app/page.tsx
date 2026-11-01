@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Float, Line } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -140,7 +140,24 @@ function Scene({
   const trackingElapsed = useRef(0);
   const trackingSampleElapsed = useRef(0);
   const trackingRaycaster = useRef(new THREE.Raycaster());
+  const pendingMovement = useRef({ x: 0, y: 0 });
   const screenCenter = useMemo(() => new THREE.Vector2(0, 0), []);
+  const applyPendingMovement = useCallback(() => {
+    if (paused) {
+      pendingMovement.current.x = 0;
+      pendingMovement.current.y = 0;
+      return;
+    }
+    const { x, y } = pendingMovement.current;
+    if (x === 0 && y === 0) return;
+    pendingMovement.current.x = 0;
+    pendingMovement.current.y = 0;
+    const radiansPerInput = (degreesPerMouseInput(sensitivity, dpi, rawCounts) * Math.PI) / 180;
+    const yawDelta = -x * radiansPerInput;
+    angleRef.current += yawDelta;
+    camera.rotation.y += yawDelta;
+    camera.rotation.x = Math.max(-1.25, Math.min(1.25, camera.rotation.x - y * radiansPerInput));
+  }, [angleRef, camera, dpi, paused, rawCounts, sensitivity]);
   useEffect(() => {
     camera.rotation.order = 'YXZ';
   }, [camera]);
@@ -165,6 +182,10 @@ function Scene({
     };
     const onLockChange = () => {
       const locked = document.pointerLockElement === c;
+      if (!locked) {
+        pendingMovement.current.x = 0;
+        pendingMovement.current.y = 0;
+      }
       onPointerLockChange(locked);
       if (locked) onPointerCaptured();
       else onRawInputChange(false);
@@ -181,6 +202,7 @@ function Scene({
         onMiss();
         return;
       }
+      applyPendingMovement();
       raycaster.setFromCamera(center, camera);
       const targetHits = raycaster.intersectObject(targetRef.current, true);
       if (targetHits.length) {
@@ -192,14 +214,8 @@ function Scene({
     };
     const onMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== c || paused) return;
-      const radiansPerInput = (degreesPerMouseInput(sensitivity, dpi, rawCounts) * Math.PI) / 180;
-      const yawDelta = -e.movementX * radiansPerInput;
-      angleRef.current += yawDelta;
-      camera.rotation.y += yawDelta;
-      camera.rotation.x = Math.max(
-        -1.25,
-        Math.min(1.25, camera.rotation.x - e.movementY * radiansPerInput),
-      );
+      pendingMovement.current.x += e.movementX;
+      pendingMovement.current.y += e.movementY;
     };
     c.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mousemove', onMove);
@@ -223,6 +239,7 @@ function Scene({
     onPointerLockChange,
     target,
     trackingOnly,
+    applyPendingMovement,
   ]);
   useEffect(() => {
     if (!target || !targetRef.current) return;
@@ -235,6 +252,7 @@ function Scene({
     trackingSampleElapsed.current = 0;
   }, [target, camera]);
   useFrame((_, delta) => {
+    applyPendingMovement();
     if (targetRef.current && !paused && tracking) {
       trackingElapsed.current += delta;
       const elapsed = trackingElapsed.current;
@@ -985,7 +1003,12 @@ export default function Home() {
               </div>
             ) : (
               <div className="arena">
-                <Canvas className="arena-canvas" camera={{ position: [0, 0, 0], fov: 75 }}>
+                <Canvas
+                  className="arena-canvas"
+                  camera={{ position: [0, 0, 0], fov: 75 }}
+                  dpr={[1, 1.25]}
+                  gl={{ powerPreference: 'high-performance' }}
+                >
                   <Scene
                     target={target}
                     onHit={record}
