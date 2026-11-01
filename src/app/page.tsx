@@ -394,12 +394,14 @@ export default function Home() {
     settings,
     trials,
     history,
+    personalBests,
     setSettings,
     addTrial,
     clearTrials,
     addHistoryEntry,
     removeHistoryEntry,
     clearHistory,
+    clearPersonalBests,
   } = useCalibration();
   const savedHistorySession = useRef<number | null>(null);
   const [dpiInput, setDpiInput] = useState(String(settings.dpi));
@@ -765,6 +767,13 @@ export default function Home() {
       testLength: confirmationRun ? 'Follow-up' : testLength,
       blocks: blockTotal,
       scoreGap: result.scoreGap,
+      overallScore: result.winner.score,
+      exerciseScores: Object.fromEntries(
+        exerciseCardData.map((exercise) => [
+          exercise.id,
+          (confirmationRun ? exercise.confirmation?.score : null) ?? exercise.screening.score,
+        ]),
+      ),
     };
     addHistoryEntry(entry);
   }, [
@@ -777,6 +786,7 @@ export default function Home() {
     confirmationRun,
     testLength,
     blockTotal,
+    exerciseCardData,
     addHistoryEntry,
   ]);
   const cardAccuracy = useMemo(() => {
@@ -1477,6 +1487,82 @@ export default function Home() {
                 ))}
               </article>
             </div>
+            <section className="performance-section" aria-labelledby="performance-title">
+              <div className="performance-heading">
+                <div>
+                  <span className="eyebrow">YOUR SESSION</span>
+                  <h2 id="performance-title">PERFORMANCE BREAKDOWN</h2>
+                  <p>Scores for the recommended sensitivity, split by exercise.</p>
+                </div>
+              </div>
+              <div className="performance-list">
+                {exerciseCardData.map((exercise) => {
+                  const metrics = confirmationRun && exercise.confirmation
+                    ? exercise.confirmation
+                    : exercise.screening;
+                  return (
+                    <article className="performance-row" key={exercise.id}>
+                      <div className="performance-label">
+                        <strong>{exercise.name}</strong>
+                        <span>{exercise.desc}</span>
+                      </div>
+                      <div className="performance-score">
+                        <div className="performance-track">
+                          <i style={{ width: `${Math.max(0, Math.min(100, metrics.score * 100))}%` }} />
+                        </div>
+                        <b>{Math.round(metrics.score * 100)}<small>/100</small></b>
+                      </div>
+                      <div className="performance-stat">
+                        <span>CENTER</span>
+                        <b>{metrics.centerAccuracy === null ? '—' : `${Math.round(metrics.centerAccuracy)}/100`}</b>
+                      </div>
+                      <div className="performance-stat">
+                        <span>HIT RATE</span>
+                        <b>{metrics.hitRate === null ? 'TRACKING' : `${Math.round(metrics.hitRate)}%`}</b>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+            <section className="personal-bests" aria-labelledby="personal-bests-title">
+              <div className="performance-heading">
+                <div>
+                  <span className="eyebrow">ACROSS ALL SAVED SESSIONS</span>
+                  <h2 id="personal-bests-title">PERSONAL BESTS</h2>
+                </div>
+                {(personalBests.accuracy !== null || personalBests.overallScore !== null) && (
+                  <button className="text-button" onClick={clearPersonalBests}>
+                    RESET BESTS
+                  </button>
+                )}
+              </div>
+              <div className="best-grid">
+                <article className="best-card">
+                  <span>BEST CENTER ACCURACY</span>
+                  <strong>{personalBests.accuracy === null ? '—' : `${Math.round(personalBests.accuracy)}/100`}</strong>
+                </article>
+                <article className="best-card">
+                  <span>BEST SESSION SCORE</span>
+                  <strong>{personalBests.overallScore === null ? '—' : `${Math.round(personalBests.overallScore * 100)}/100`}</strong>
+                </article>
+                <article className="best-card">
+                  <span>STRONGEST CONFIDENCE</span>
+                  <strong>{personalBests.confidence ?? '—'}</strong>
+                </article>
+                {modes.map((exercise) => (
+                  <article className="best-card" key={exercise.id}>
+                    <span>BEST · {exercise.name}</span>
+                    <strong>
+                      {personalBests.exerciseScores[exercise.id] === undefined
+                        ? '—'
+                        : `${Math.round(personalBests.exerciseScores[exercise.id] * 100)}/100`}
+                    </strong>
+                  </article>
+                ))}
+              </div>
+              <small className="history-note">Personal bests stay on this device, even if you clear your session history.</small>
+            </section>
             <section className="history-section" aria-labelledby="history-title">
               <div className="history-heading">
                 <div>
