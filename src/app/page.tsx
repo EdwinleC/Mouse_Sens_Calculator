@@ -137,9 +137,9 @@ function Target({
       <sphereGeometry args={[size, 16, 16]} />
       <meshBasicMaterial color={color} />
       {centerMarker && (
-        <mesh position={[0, 0, size + 0.003]} raycast={() => {}}>
-          <sphereGeometry args={[size * 0.095, 10, 10]} />
-          <meshBasicMaterial color="#ff3b30" depthTest={false} />
+        <mesh position={[0, 0, 0]} renderOrder={10} raycast={() => {}}>
+          <circleGeometry args={[size * 0.095, 16]} />
+          <meshBasicMaterial color="#ff3b30" depthTest={false} depthWrite={false} />
         </mesh>
       )}
       <mesh position={[0, 0, -0.03]} raycast={() => {}}>
