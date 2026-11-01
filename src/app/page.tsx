@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Float, Line } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -30,6 +30,13 @@ import {
 import { useCalibration, type SensitivityHistoryEntry } from '@/lib/store';
 
 type View = 'home' | 'setup' | 'trainer' | 'results';
+type Theme = 'lime' | 'blue' | 'coral' | 'violet';
+const themeColors: Record<Theme, string> = {
+  lime: '#d7ff4f',
+  blue: '#62d9ff',
+  coral: '#ff735e',
+  violet: '#b99aff',
+};
 function shuffle<T>(items: T[]) {
   const shuffled = [...items];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -443,6 +450,17 @@ export default function Home() {
     clearPersonalBests,
   } = useCalibration();
   const savedHistorySession = useRef<number | null>(null);
+  const [theme, setTheme] = useState<Theme>('lime');
+  useEffect(() => {
+    const saved = localStorage.getItem('senslab-theme');
+    if (saved && Object.hasOwn(themeColors, saved)) setTheme(saved as Theme);
+  }, []);
+  const changeTheme = (value: string) => {
+    if (Object.hasOwn(themeColors, value)) {
+      setTheme(value as Theme);
+      localStorage.setItem('senslab-theme', value);
+    }
+  };
   const [soundEnabled, setSoundEnabled] = useState(true);
   useEffect(() => {
     const enabled = localStorage.getItem('senslab-hit-sound') !== 'false';
@@ -964,7 +982,7 @@ export default function Home() {
   };
   const fmt = (n: number, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—');
   return (
-    <main>
+    <main data-theme={theme} style={{ '--accent': themeColors[theme] } as CSSProperties}>
       <header className="nav">
         <button className="wordmark" onClick={() => setView('home')}>
           SENS<span>/</span>LAB
@@ -978,6 +996,15 @@ export default function Home() {
           </button>
           <button onClick={() => setView('setup')}>CALIBRATION</button>
         </nav>
+        <label className="theme-switcher">
+          <span>THEME</span>
+          <select value={theme} onChange={(event) => changeTheme(event.target.value)}>
+            <option value="lime">LIME</option>
+            <option value="blue">ARCTIC</option>
+            <option value="coral">CORAL</option>
+            <option value="violet">VIOLET</option>
+          </select>
+        </label>
         <button className="button button-small" onClick={() => setView('setup')}>
           START TEST <ArrowUpRight size={14} />
         </button>
@@ -1767,7 +1794,7 @@ export default function Home() {
                       <stop offset="1" stopColor="#0a0a0a" />
                     </linearGradient>
                     <linearGradient id="card-bar" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0" stopColor="#d7ff4f" />
+                      <stop offset="0" stopColor={themeColors[theme]} />
                       <stop offset="1" stopColor="#f4f4f4" />
                     </linearGradient>
                   </defs>
@@ -1793,7 +1820,7 @@ export default function Home() {
                     fontWeight="700"
                     letterSpacing="4"
                   >
-                    SENS<tspan fill="#d7ff4f">/</tspan>LAB
+                    SENS<tspan fill={themeColors[theme]}>/</tspan>LAB
                   </text>
                   <text
                     x="1128"
@@ -1810,7 +1837,7 @@ export default function Home() {
                     x="1128"
                     y="108"
                     textAnchor="end"
-                    fill="#d7ff4f"
+                    fill={themeColors[theme]}
                     fontFamily="monospace"
                     fontSize="14"
                     letterSpacing="1"
@@ -1847,8 +1874,8 @@ export default function Home() {
                     fontSize="17"
                     letterSpacing="1"
                   >
-                    {settings.dpi} DPI <tspan fill="#d7ff4f">·</tspan>{' '}
-                    {fmt(edpi(settings.dpi, result.sens), 0)} eDPI <tspan fill="#d7ff4f">·</tspan>{' '}
+                    {settings.dpi} DPI <tspan fill={themeColors[theme]}>·</tspan>{' '}
+                    {fmt(edpi(settings.dpi, result.sens), 0)} eDPI <tspan fill={themeColors[theme]}>·</tspan>{' '}
                     {fmt(cm360(settings.dpi, result.sens), 1)} cm / 360°
                   </text>
 
@@ -1895,7 +1922,7 @@ export default function Home() {
                     );
                   })}
 
-                  <text x="74" y="625" fill="#d7ff4f" fontFamily="monospace" fontSize="13">
+                  <text x="74" y="625" fill={themeColors[theme]} fontFamily="monospace" fontSize="13">
                     AIM PROFILE · {aimProfile.title}
                   </text>
                   <text
@@ -1956,7 +1983,7 @@ export default function Home() {
                   <text
                     x="714"
                     y="713"
-                    fill="#d7ff4f"
+                    fill={themeColors[theme]}
                     fontFamily="monospace"
                     fontSize="34"
                     fontWeight="700"
@@ -2119,7 +2146,7 @@ export default function Home() {
                         <text
                           x="96"
                           y={rowY + 25}
-                          fill={recommended ? '#d7ff4f' : '#e2e4e4'}
+                          fill={recommended ? themeColors[theme] : '#e2e4e4'}
                           fontFamily="monospace"
                           fontSize="15"
                         >
@@ -2138,7 +2165,7 @@ export default function Home() {
                         <text
                           x="420"
                           y={rowY + 25}
-                          fill={row.confirmationScore === null ? '#626767' : '#d7ff4f'}
+                          fill={row.confirmationScore === null ? '#626767' : themeColors[theme]}
                           fontFamily="monospace"
                           fontSize="13"
                         >
@@ -2152,7 +2179,7 @@ export default function Home() {
                             x={565 + exerciseIndex * 110}
                             y={rowY + 25}
                             textAnchor="middle"
-                            fill={recommended ? '#d7ff4f' : '#b9bdbd'}
+                            fill={recommended ? themeColors[theme] : '#b9bdbd'}
                             fontFamily="monospace"
                             fontSize="13"
                           >
@@ -2177,7 +2204,7 @@ export default function Home() {
                     x="1128"
                     y="1606"
                     textAnchor="end"
-                    fill="#d7ff4f"
+                    fill={themeColors[theme]}
                     fontFamily="monospace"
                     fontSize="12"
                   >
