@@ -27,7 +27,7 @@ import {
   type Observation,
   type Trial,
 } from '@/lib/calibration';
-import { useCalibration } from '@/lib/store';
+import { useCalibration, type SensitivityHistoryEntry } from '@/lib/store';
 
 type View = 'home' | 'setup' | 'trainer' | 'results';
 function shuffle<T>(items: T[]) {
@@ -390,7 +390,18 @@ export default function Home() {
     [undershoots, setUndershoots] = useState(0),
     [copied, setCopied] = useState(false);
   const angleRef = useRef(0);
-  const { settings, trials, setSettings, addTrial, clearTrials } = useCalibration();
+  const {
+    settings,
+    trials,
+    history,
+    setSettings,
+    addTrial,
+    clearTrials,
+    addHistoryEntry,
+    removeHistoryEntry,
+    clearHistory,
+  } = useCalibration();
+  const savedHistorySession = useRef<number | null>(null);
   const [dpiInput, setDpiInput] = useState(String(settings.dpi));
   const [sensInput, setSensInput] = useState(String(settings.sens));
   const [pollingInput, setPollingInput] = useState(String(settings.polling));
@@ -635,6 +646,7 @@ export default function Home() {
     trackingRemainingRef.current = 20_000;
     setTrackingRemaining(20);
     setCompletedAt(null);
+    savedHistorySession.current = null;
     setCardActionMessage('');
     angleRef.current = 0;
     setTrialStart(0);
@@ -733,6 +745,40 @@ export default function Home() {
       ? summarizeExercise(analysisTrials, exercise.id, result.sens)
       : null,
   }));
+  useEffect(() => {
+    if (
+      view !== 'results' ||
+      !completedAt ||
+      savedHistorySession.current === completedAt.getTime() ||
+      !result.winner
+    )
+      return;
+    savedHistorySession.current = completedAt.getTime();
+    const entry: SensitivityHistoryEntry = {
+      id: `${completedAt.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      completedAt: completedAt.toISOString(),
+      startingSens: settings.sens,
+      recommendedSens: result.sens,
+      dpi: settings.dpi,
+      confidence: result.confidence,
+      accuracy: centerAccuracy,
+      testLength: confirmationRun ? 'Follow-up' : testLength,
+      blocks: blockTotal,
+      scoreGap: result.scoreGap,
+    };
+    addHistoryEntry(entry);
+  }, [
+    view,
+    completedAt,
+    result,
+    settings.sens,
+    settings.dpi,
+    centerAccuracy,
+    confirmationRun,
+    testLength,
+    blockTotal,
+    addHistoryEntry,
+  ]);
   const cardAccuracy = useMemo(() => {
     const trialScores = trials.flatMap((trial) => {
       const scores = (trial.observations ?? []).flatMap((observation) =>
@@ -1431,6 +1477,62 @@ export default function Home() {
                 ))}
               </article>
             </div>
+            <section className="history-section" aria-labelledby="history-title">
+              <div className="history-heading">
+                <div>
+                  <span className="eyebrow">SAVED IN THIS BROWSER</span>
+                  <h2 id="history-title">SENSITIVITY HISTORY</h2>
+                  <p>Compare recommendations from your past calibration sessions.</p>
+                </div>
+                {history.length > 0 && (
+                  <button className="text-button" onClick={clearHistory}>
+                    CLEAR HISTORY
+                  </button>
+                )}
+              </div>
+              {history.length === 0 ? (
+                <p className="history-empty">Your completed sessions will appear here.</p>
+              ) : (
+                <div className="history-list">
+                  {history.map((entry) => (
+                    <article className="history-row" key={entry.id}>
+                      <div className="history-date">
+                        <strong>
+                          {new Date(entry.completedAt).toLocaleDateString(undefined, {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </strong>
+                        <span>{entry.testLength} · {entry.blocks} BLOCKS</span>
+                      </div>
+                      <div className="history-sens">
+                        <span>STARTING</span>
+                        <b>{fmt(entry.startingSens, 2)}</b>
+                      </div>
+                      <ArrowRight size={15} aria-hidden="true" />
+                      <div className="history-sens recommended">
+                        <span>RECOMMENDED</span>
+                        <b>{fmt(entry.recommendedSens, 2)}</b>
+                      </div>
+                      <div className="history-meta">
+                        <span>{entry.dpi} DPI</span>
+                        <span>{entry.confidence.toUpperCase()} CONFIDENCE</span>
+                        <span>{entry.accuracy === null ? '—' : `${Math.round(entry.accuracy)}/100`} ACCURACY</span>
+                      </div>
+                      <button
+                        className="history-remove"
+                        aria-label={`Remove history entry from ${new Date(entry.completedAt).toLocaleDateString()}`}
+                        onClick={() => removeHistoryEntry(entry.id)}
+                      >
+                        REMOVE
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+              <small className="history-note">History is stored locally on this device and browser.</small>
+            </section>
             <section className="share-card-section">
               <div className="share-card-heading">
                 <div>
