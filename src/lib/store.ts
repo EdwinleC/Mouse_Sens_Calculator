@@ -16,6 +16,8 @@ export type SensitivityHistoryEntry = {
   scoreGap: number;
   overallScore: number;
   exerciseScores: Record<string, number>;
+  aimProfile: string;
+  profileSummary: string;
 };
 export type PersonalBests = {
   accuracy: number | null;

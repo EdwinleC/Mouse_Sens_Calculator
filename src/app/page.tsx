@@ -77,6 +77,43 @@ function summarizeExercise(trials: Trial[], modeId: string, sensitivity: number)
   };
 }
 
+function getAimProfile(exerciseScores: Record<string, number>) {
+  const groups = [
+    { id: 'flick', name: 'FLICK CONTROL', exercises: ['horizontal', 'wide'] },
+    { id: 'precision', name: 'PRECISION AIM', exercises: ['micro'] },
+    { id: 'tracking', name: 'TRACKING AIM', exercises: ['tracking', 'tracking-duration'] },
+  ]
+    .map((group) => {
+      const scores = group.exercises.flatMap((exercise) =>
+        typeof exerciseScores[exercise] === 'number' ? [exerciseScores[exercise]] : [],
+      );
+      return { ...group, score: mean(scores) };
+    })
+    .filter((group): group is typeof group & { score: number } => group.score !== null)
+    .sort((a, b) => b.score - a.score);
+  if (groups.length < 2) {
+    return {
+      title: 'PROFILE IN PROGRESS',
+      summary: 'Complete more exercises to reveal your strongest aim style.',
+      strongest: groups[0] ?? null,
+      growthArea: null,
+      groups,
+    };
+  }
+  const strongest = groups[0];
+  const growthArea = groups[groups.length - 1];
+  const balanced = strongest.score - growthArea.score < 0.05;
+  return {
+    title: balanced ? 'ALL-ROUND AIM' : strongest.name,
+    summary: balanced
+      ? 'Your scores are close across flicking, precision, and tracking.'
+      : `Your strongest area is ${strongest.name.toLowerCase()}; ${growthArea.name.toLowerCase()} has the most room to grow.`,
+    strongest,
+    growthArea,
+    groups,
+  };
+}
+
 function Target({
   position,
   size,
@@ -390,6 +427,8 @@ export default function Home() {
     [undershoots, setUndershoots] = useState(0),
     [copied, setCopied] = useState(false);
   const angleRef = useRef(0);
+  const hitAudioContext = useRef<AudioContext | null>(null);
+  const hitSoundEnabled = useRef(true);
   const {
     settings,
     trials,
@@ -404,6 +443,12 @@ export default function Home() {
     clearPersonalBests,
   } = useCalibration();
   const savedHistorySession = useRef<number | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  useEffect(() => {
+    const enabled = localStorage.getItem('senslab-hit-sound') !== 'false';
+    hitSoundEnabled.current = enabled;
+    setSoundEnabled(enabled);
+  }, []);
   const [dpiInput, setDpiInput] = useState(String(settings.dpi));
   const [sensInput, setSensInput] = useState(String(settings.sens));
   const [pollingInput, setPollingInput] = useState(String(settings.polling));
@@ -535,7 +580,37 @@ export default function Home() {
     }, 260);
   };
   finishTargetRef.current = finishTarget;
-  const record = (centerAccuracy: number) => finishTargetRef.current(true, centerAccuracy);
+  const record = (centerAccuracy: number) => {
+    if (hitSoundEnabled.current && typeof window !== 'undefined' && window.AudioContext) {
+      try {
+        const audio = hitAudioContext.current ?? new window.AudioContext();
+        hitAudioContext.current = audio;
+        void audio.resume();
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        const now = audio.currentTime;
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(780, now);
+        oscillator.frequency.exponentialRampToValueAtTime(520, now + 0.07);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.start(now);
+        oscillator.stop(now + 0.09);
+      } catch {
+        // Audio is optional; target input should continue if the browser blocks sound.
+      }
+    }
+    finishTargetRef.current(true, centerAccuracy);
+  };
+  const toggleSound = () => {
+    const enabled = !soundEnabled;
+    hitSoundEnabled.current = enabled;
+    setSoundEnabled(enabled);
+    localStorage.setItem('senslab-hit-sound', String(enabled));
+  };
   const recordTrackingSample = (centerAccuracy: number) => {
     trackingSamplesRef.current.push(centerAccuracy);
   };
@@ -747,6 +822,13 @@ export default function Home() {
       ? summarizeExercise(analysisTrials, exercise.id, result.sens)
       : null,
   }));
+  const aimProfileScores = Object.fromEntries(
+    exerciseCardData.map((exercise) => [
+      exercise.id,
+      (confirmationRun ? exercise.confirmation?.score : null) ?? exercise.screening.score,
+    ]),
+  );
+  const aimProfile = getAimProfile(aimProfileScores);
   useEffect(() => {
     if (
       view !== 'results' ||
@@ -774,6 +856,8 @@ export default function Home() {
           (confirmationRun ? exercise.confirmation?.score : null) ?? exercise.screening.score,
         ]),
       ),
+      aimProfile: aimProfile.title,
+      profileSummary: aimProfile.summary,
     };
     addHistoryEntry(entry);
   }, [
@@ -787,6 +871,7 @@ export default function Home() {
     testLength,
     blockTotal,
     exerciseCardData,
+    aimProfile,
     addHistoryEntry,
   ]);
   const cardAccuracy = useMemo(() => {
@@ -1173,6 +1258,19 @@ export default function Home() {
                 />
               </label>
             </div>
+            <label className="sound-setting">
+              <span>
+                <strong>HIT SOUND</strong>
+                <small>Play a short tone when you hit a target.</small>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={soundEnabled}
+                onChange={toggleSound}
+                aria-label="Play a sound when a target is hit"
+              />
+            </label>
             <div className="calc-strip">
               <div>
                 <span>eDPI</span>
@@ -1525,6 +1623,27 @@ export default function Home() {
                 })}
               </div>
             </section>
+            <section className="aim-profile" aria-labelledby="aim-profile-title">
+              <div className="aim-profile-intro">
+                <span className="eyebrow">YOUR AIM PROFILE</span>
+                <h2 id="aim-profile-title">{aimProfile.title}</h2>
+                <p>{aimProfile.summary}</p>
+              </div>
+              <div className="aim-profile-skills">
+                {aimProfile.groups.map((group) => (
+                  <div className="aim-skill" key={group.id}>
+                    <div>
+                      <span>{group.name}</span>
+                      <b>{Math.round(group.score * 100)}/100</b>
+                    </div>
+                    <div className="performance-track">
+                      <i style={{ width: `${Math.max(0, Math.min(100, group.score * 100))}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <small>Based on this session’s task scores; it describes test performance, not a permanent player label.</small>
+            </section>
             <section className="personal-bests" aria-labelledby="personal-bests-title">
               <div className="performance-heading">
                 <div>
@@ -1590,7 +1709,7 @@ export default function Home() {
                             day: 'numeric',
                           })}
                         </strong>
-                        <span>{entry.testLength} · {entry.blocks} BLOCKS</span>
+                        <span>{entry.testLength} · {entry.blocks} BLOCKS · {entry.aimProfile}</span>
                       </div>
                       <div className="history-sens">
                         <span>STARTING</span>
@@ -1775,6 +1894,20 @@ export default function Home() {
                       </g>
                     );
                   })}
+
+                  <text x="74" y="625" fill="#d7ff4f" fontFamily="monospace" fontSize="13">
+                    AIM PROFILE · {aimProfile.title}
+                  </text>
+                  <text
+                    x="1128"
+                    y="625"
+                    textAnchor="end"
+                    fill="#929596"
+                    fontFamily="Arial, sans-serif"
+                    fontSize="13"
+                  >
+                    {aimProfile.summary}
+                  </text>
 
                   <text
                     x="74"
