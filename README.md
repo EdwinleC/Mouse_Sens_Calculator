@@ -17,7 +17,7 @@ Open http://localhost:3000. `npm run build` exports the static site to `out/`; `
 
 ## GitHub Pages
 
-This app runs entirely in the browser and needs no API or server, so it can be hosted as static files. The included GitHub Actions workflow targets the `Mouse_Sens_Calculator` repository name. Push to `main`, then enable GitHub Pages with **GitHub Actions** as the source. To create the deployment artifact locally, run `npm run build:github`; the files are written to `out/`.
+This app runs entirely in the browser and needs no API or server, so it can be hosted as static files. To publish directly from `main`, run `npm run build:github` and commit the generated `docs/` folder. In the repository's **Settings → Pages**, choose **Deploy from a branch**, select `main` and `/docs`, then save. The export is written to both `out/` and `docs/`; `out/` remains useful for local preview and Actions based deployment.
 
 ## Structure
 

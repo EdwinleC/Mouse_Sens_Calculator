@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:github": "GITHUB_PAGES=true next build",
+    "build:github": "GITHUB_PAGES=true next build && node scripts/copy-to-docs.mjs",
     "start": "node scripts/serve.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
