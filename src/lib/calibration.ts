@@ -7,6 +7,7 @@ export function degreesPerMouseInput(sens: number, dpi: number, rawCounts: boole
 }
 export type Observation = {
   hit: boolean;
+  mode?: string;
   timeMs: number;
   /** Aim point proximity to the target center, from 0 to 100. */
   centerAccuracy?: number;
@@ -37,6 +38,8 @@ export function candidates(base: number): number[] {
   ];
 }
 export function observationScore(o: Observation): number {
+  if (o.mode === 'tracking-duration')
+    return Math.max(0, Math.min(1, (o.centerAccuracy ?? 0) / 100));
   if (!o.hit) return 0;
   const speed = Math.max(0, Math.min(1, (1500 - o.timeMs) / 1200));
   const error = o.angularErrorDeg === null ? 1 : Math.max(0, 1 - o.angularErrorDeg / 18);
@@ -68,14 +71,11 @@ export function recommend(trials: Trial[], base: number) {
   const ranked = [...groups]
     .map(([sens, ts]) => {
       const observations = ts.flatMap((t) => t.observations ?? []);
-      const values = observations.length ? observations.map(observationScore) : ts.map(score);
+      const values = ts.map(score);
       const blockIds = [...new Set(ts.map((t) => t.block ?? 0))];
       const blockScores = blockIds.map((block) => {
         const blockTrials = ts.filter((t) => (t.block ?? 0) === block);
-        const blockObservations = blockTrials.flatMap((t) => t.observations ?? []);
-        const blockValues = blockObservations.length
-          ? blockObservations.map(observationScore)
-          : blockTrials.map(score);
+        const blockValues = blockTrials.map(score);
         return {
           block,
           score:
@@ -100,6 +100,7 @@ export function recommend(trials: Trial[], base: number) {
         n: observations.length || ts.length,
         standardError: Math.sqrt(variance / Math.max(1, effectiveN)),
         modes: new Set(ts.map((t) => t.mode)).size,
+        hasTimedTracking: ts.some((t) => t.mode === 'tracking-duration'),
         blocks: blockScores.length,
         blockScores,
       };
@@ -146,12 +147,13 @@ export function recommend(trials: Trial[], base: number) {
       ? criticalValue * Math.sqrt(pairedVariance / pairedDifferences.length)
       : 1.96 * Math.sqrt(winner.standardError ** 2 + runnerUp.standardError ** 2)
     : Infinity;
+  const requiredModes = ranked.some((row) => row.hasTimedTracking) ? 5 : 4;
   const enough =
     winner.n >= 40 &&
-    winner.modes >= 4 &&
+    winner.modes >= requiredModes &&
     winner.blocks >= 3 &&
     ranked.length >= 3 &&
-    ranked.every((row) => row.n >= 40 && row.modes >= 4 && row.blocks >= 3);
+    ranked.every((row) => row.n >= 40 && row.modes >= requiredModes && row.blocks >= 3);
   const confidence = !enough ? 'Low' : gap > ci95 ? 'High' : gap > ci95 * 0.5 ? 'Moderate' : 'Low';
   return {
     sens: winner.sens,

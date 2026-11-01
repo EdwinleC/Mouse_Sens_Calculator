@@ -33,6 +33,11 @@ const modes = [
   { id: 'micro', name: 'MICRO ADJUSTMENTS', desc: 'Small targets. Deliberate control.' },
   { id: 'wide', name: 'WIDE FLICKS', desc: 'Longer transfers. Stay composed.' },
   { id: 'tracking', name: 'TARGET TRACKING', desc: 'Follow the movement. Keep it centered.' },
+  {
+    id: 'tracking-duration',
+    name: '20-SECOND TRACKING',
+    desc: 'Keep the crosshair on the moving ball. Do not click.',
+  },
 ];
 function Target({
   position,
@@ -89,6 +94,8 @@ function Scene({
   onMiss,
   paused,
   tracking,
+  trackingOnly,
+  onTrackingSample,
   sensitivity,
   dpi,
   rawCounts,
@@ -100,6 +107,8 @@ function Scene({
   onMiss: () => void;
   paused: boolean;
   tracking: boolean;
+  trackingOnly: boolean;
+  onTrackingSample: (centerAccuracy: number) => void;
   sensitivity: number;
   dpi: number;
   rawCounts: boolean;
@@ -109,7 +118,10 @@ function Scene({
   const { camera } = useThree();
   const targetRef = useRef<THREE.Group>(null);
   const trackingOrigin = useRef(new THREE.Vector3());
-  const trackingStarted = useRef(0);
+  const trackingElapsed = useRef(0);
+  const trackingSampleElapsed = useRef(0);
+  const trackingRaycaster = useRef(new THREE.Raycaster());
+  const screenCenter = useMemo(() => new THREE.Vector2(0, 0), []);
   useEffect(() => {
     camera.rotation.order = 'YXZ';
   }, [camera]);
@@ -141,6 +153,7 @@ function Scene({
         requestLock();
         return;
       }
+      if (trackingOnly) return;
       if (e.button !== 0) return;
       if (!targetRef.current || !target) {
         onMiss();
@@ -185,6 +198,7 @@ function Scene({
     onMiss,
     onRawInputChange,
     target,
+    trackingOnly,
   ]);
   useEffect(() => {
     if (!target || !targetRef.current) return;
@@ -193,13 +207,26 @@ function Scene({
       .add(camera.position);
     targetRef.current.position.copy(initial);
     trackingOrigin.current.copy(initial);
-    trackingStarted.current = performance.now();
+    trackingElapsed.current = 0;
+    trackingSampleElapsed.current = 0;
   }, [target, camera]);
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (targetRef.current && !paused && tracking) {
-      const elapsed = (performance.now() - trackingStarted.current) / 1000;
+      trackingElapsed.current += delta;
+      const elapsed = trackingElapsed.current;
       targetRef.current.position.x = trackingOrigin.current.x + Math.sin(elapsed * 1.25) * 1.4;
       targetRef.current.position.y = trackingOrigin.current.y + Math.sin(elapsed * 0.8) * 0.45;
+      if (trackingOnly) {
+        trackingSampleElapsed.current += delta;
+        if (trackingSampleElapsed.current >= 0.1) {
+          trackingSampleElapsed.current %= 0.1;
+          trackingRaycaster.current.setFromCamera(screenCenter, camera);
+          const targetCenter = targetRef.current.getWorldPosition(new THREE.Vector3());
+          const centerOffset = trackingRaycaster.current.ray.distanceToPoint(targetCenter);
+          const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / (target?.size ?? 1)));
+          onTrackingSample(centerAccuracy);
+        }
+      }
     }
   });
   return (
@@ -225,6 +252,8 @@ export default function Home() {
   const missTimer = useRef<number | undefined>(undefined);
   const finishTargetRef = useRef<(hit: boolean, centerAccuracy?: number) => void>(() => {});
   const spawnRef = useRef<() => void>(() => {});
+  const trackingSamplesRef = useRef<number[]>([]);
+  const trackingRemainingRef = useRef(20_000);
   const [view, setView] = useState<View>('home'),
     [testLength, setTestLength] = useState<'quick' | 'long' | 'longest'>('quick'),
     [blockIndex, setBlockIndex] = useState(0),
@@ -235,6 +264,7 @@ export default function Home() {
       null,
     ),
     [paused, setPaused] = useState(false),
+    [trackingRemaining, setTrackingRemaining] = useState(20),
     [rawCounts, setRawCounts] = useState(false),
     [count, setCount] = useState(0),
     [trialStart, setTrialStart] = useState(0),
@@ -255,9 +285,15 @@ export default function Home() {
   const blockTotal = testLength === 'quick' ? 1 : testLength === 'long' ? 3 : 5;
   const repetitions = testLength === 'quick' ? 5 : 4;
   const sens = testSens[candidateIndex] ?? settings.sens;
-  const mode = { ...modes[modeIndex], count: repetitions };
+  const mode = {
+    ...modes[modeIndex],
+    count: modes[modeIndex].id === 'tracking-duration' ? 1 : repetitions,
+  };
   const finishTarget = (hit: boolean, centerAccuracy = 0) => {
     if (paused || !target) return;
+    const timedTracking = mode.id === 'tracking-duration';
+    const isTracking = mode.id === 'tracking' || timedTracking;
+    const scoredHit = hit && !timedTracking;
     window.clearTimeout(missTimer.current);
     const elapsed = performance.now() - trialStart;
     const angular = (Math.atan2(target.position[0], 10) * 180) / Math.PI;
@@ -268,48 +304,49 @@ export default function Home() {
     const wasUnder =
       Math.sign(moved) !== Math.sign(angular) || Math.abs(moved) < Math.abs(angular) - 1;
     const observation: Observation = {
-      hit,
+      hit: scoredHit,
+      mode: mode.id,
       timeMs: elapsed,
-      centerAccuracy: hit ? centerAccuracy : 0,
-      angularErrorDeg: hit && mode.id !== 'tracking' ? error : null,
-      corrections: hit && mode.id !== 'tracking' && error > 3 ? 1 : 0,
-      overshot: hit && mode.id !== 'tracking' && wasOver,
-      undershot: hit && mode.id !== 'tracking' && wasUnder,
+      centerAccuracy: timedTracking ? centerAccuracy : hit ? centerAccuracy : 0,
+      angularErrorDeg: scoredHit && !isTracking ? error : null,
+      corrections: scoredHit && !isTracking && error > 3 ? 1 : 0,
+      overshot: scoredHit && !isTracking && wasOver,
+      undershot: scoredHit && !isTracking && wasUnder,
     };
     const nextObservations = [...observations, observation];
     setObservations(nextObservations);
-    if (hit) {
+    if (scoredHit) {
       setHits((h) => h + 1);
       setTimes((a) => [...a, elapsed]);
-      if (mode.id !== 'tracking') setErrors((a) => [...a, error]);
-      if (mode.id !== 'tracking' && wasOver) setOvershoots((n) => n + 1);
-      else if (mode.id !== 'tracking' && wasUnder) setUndershoots((n) => n + 1);
-      if (mode.id !== 'tracking' && error > 3) setCorrections((n) => n + 1);
+      if (!isTracking) setErrors((a) => [...a, error]);
+      if (!isTracking && wasOver) setOvershoots((n) => n + 1);
+      else if (!isTracking && wasUnder) setUndershoots((n) => n + 1);
+      if (!isTracking && error > 3) setCorrections((n) => n + 1);
     }
-    setShots((s) => s + 1);
+    if (!timedTracking) setShots((s) => s + 1);
     setTarget(null);
     window.setTimeout(() => {
       const next = count + 1;
       setCount(next);
       if (next >= mode.count) {
-        const hitCount = hits + (hit ? 1 : 0),
-          shotCount = shots + 1;
+        const hitCount = hits + (scoredHit ? 1 : 0),
+          shotCount = shots + (timedTracking ? 0 : 1);
         const nextTrial: Trial = {
           sens,
           hits: hitCount,
           shots: shotCount,
-          times: hit ? [...times, elapsed] : times,
-          errors: hit && mode.id !== 'tracking' ? [...errors, error] : errors,
-          corrections: corrections + (hit && mode.id !== 'tracking' && error > 3 ? 1 : 0),
-          overshoots: overshoots + (hit && mode.id !== 'tracking' && wasOver ? 1 : 0),
-          undershoots: undershoots + (hit && mode.id !== 'tracking' && wasUnder ? 1 : 0),
+          times: scoredHit ? [...times, elapsed] : times,
+          errors: scoredHit && !isTracking ? [...errors, error] : errors,
+          corrections: corrections + (scoredHit && !isTracking && error > 3 ? 1 : 0),
+          overshoots: overshoots + (scoredHit && !isTracking && wasOver ? 1 : 0),
+          undershoots: undershoots + (scoredHit && !isTracking && wasUnder ? 1 : 0),
           mode: mode.id,
           block: blockIndex,
           observations: nextObservations,
         };
         addTrial(nextTrial);
         setObservations([]);
-        if (modeIndex < 3) {
+        if (modeIndex < modes.length - 1) {
           setModeIndex((i) => i + 1);
           setCount(0);
           window.setTimeout(() => spawnRef.current(), 200);
@@ -339,7 +376,15 @@ export default function Home() {
   };
   finishTargetRef.current = finishTarget;
   const record = (centerAccuracy: number) => finishTargetRef.current(true, centerAccuracy);
+  const recordTrackingSample = (centerAccuracy: number) => {
+    trackingSamplesRef.current.push(centerAccuracy);
+  };
   const spawn = () => {
+    if (mode.id === 'tracking-duration') {
+      trackingSamplesRef.current = [];
+      trackingRemainingRef.current = 20_000;
+      setTrackingRemaining(20);
+    }
     const seed = blockIndex * 1009 + modeIndex * 97 + count + 1;
     const random = (salt: number) => {
       const value = Math.sin(seed * 12.9898 + salt * 78.233) * 43758.5453;
@@ -350,12 +395,18 @@ export default function Home() {
         ? (count % 2 === 0 ? 1 : -1) * (1.2 + (count % 4) * 0.55)
         : mode.id === 'micro'
           ? (random(1) * 2 - 1) * 0.6
-          : mode.id === 'tracking'
+          : mode.id === 'tracking' || mode.id === 'tracking-duration'
             ? (random(1) * 2 - 1) * 1.5
             : (random(1) < 0.5 ? -1 : 1) * (3 + random(2) * 4);
     const targetY =
       (random(3) * 2 - 1) *
-      (mode.id === 'micro' ? 0.35 : mode.id === 'tracking' ? 0.6 : mode.id === 'wide' ? 1.3 : 0.9);
+      (mode.id === 'micro'
+        ? 0.35
+        : mode.id === 'tracking' || mode.id === 'tracking-duration'
+          ? 0.6
+          : mode.id === 'wide'
+            ? 1.3
+            : 0.9);
     const scale = mode.id === 'micro' ? 0.22 : mode.id === 'wide' ? 1.15 : 0.55;
     const spawnDistance = Math.hypot(targetX, targetY);
     const spawnAngle = Math.atan2(targetY, targetX);
@@ -372,9 +423,33 @@ export default function Home() {
   spawnRef.current = spawn;
   useEffect(() => {
     if (view !== 'trainer' || paused || !target) return;
+    if (mode.id === 'tracking-duration') {
+      const startedAt = performance.now();
+      const startingRemaining = trackingRemainingRef.current;
+      const timer = window.setInterval(() => {
+        const remaining = Math.max(0, startingRemaining - (performance.now() - startedAt));
+        trackingRemainingRef.current = remaining;
+        setTrackingRemaining(Math.ceil(remaining / 1000));
+        if (remaining === 0) {
+          window.clearInterval(timer);
+          const samples = trackingSamplesRef.current;
+          const accuracy = samples.length
+            ? samples.reduce((sum, value) => sum + value, 0) / samples.length
+            : 0;
+          finishTargetRef.current(true, accuracy);
+        }
+      }, 100);
+      return () => {
+        window.clearInterval(timer);
+        trackingRemainingRef.current = Math.max(
+          0,
+          startingRemaining - (performance.now() - startedAt),
+        );
+      };
+    }
     missTimer.current = window.setTimeout(() => finishTargetRef.current(false), 2500);
     return () => window.clearTimeout(missTimer.current);
-  }, [view, paused, target]);
+  }, [view, paused, target, mode.id]);
   const unsupported = typeof window !== 'undefined' && !window.matchMedia('(pointer:fine)').matches;
   const start = () => {
     if (unsupported) {
@@ -431,11 +506,14 @@ export default function Home() {
   }, [view, paused]);
   const result = useMemo(() => recommend(trials, settings.sens), [trials, settings.sens]);
   const centerAccuracy = useMemo(() => {
-    const scores = trials
-      .flatMap((trial) => trial.observations ?? [])
-      .flatMap((observation) =>
+    const scores = trials.flatMap((trial) => {
+      const observations = (trial.observations ?? []).flatMap((observation) =>
         typeof observation.centerAccuracy === 'number' ? [observation.centerAccuracy] : [],
       );
+      return observations.length
+        ? [observations.reduce((sum, value) => sum + value, 0) / observations.length]
+        : [];
+    });
     return scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
   }, [trials]);
   const observedTargets = trials.reduce(
@@ -565,7 +643,11 @@ export default function Home() {
               </h2>
               <div className="steps">
                 {[
-                  ['01', 'TEST', 'Complete four focused exercises at measured sensitivities.'],
+                  [
+                    '01',
+                    'TEST',
+                    'Complete four aim exercises and a 20-second no-click tracking run for each sensitivity.',
+                  ],
                   ['02', 'ANALYZE', 'We compare accuracy, speed, corrections and consistency.'],
                   ['03', 'OPTIMIZE', 'Get a sensitivity range backed by your recorded trials.'],
                 ].map(([n, t, d]) => (
@@ -631,9 +713,9 @@ export default function Home() {
                   <span>01 / QUICK TEST</span>
                   <strong>One comparison block</strong>
                   <p>
-                    100 target attempts · about 2–4 minutes. A fast screening pass across all five
-                    settings. Confidence stays limited because each setting is tested once per
-                    exercise.
+                    100 target attempts plus five 20-second tracking runs · about 4–6 minutes. A
+                    fast screening pass across all five settings. Confidence stays limited because
+                    each setting is tested once per exercise.
                   </p>
                 </button>
                 <button
@@ -645,9 +727,9 @@ export default function Home() {
                   <span>02 / LONGER TEST</span>
                   <strong>Three randomized blocks</strong>
                   <p>
-                    240 target attempts · about 5–10 minutes. Each setting returns in every block,
-                    with candidate order shuffled between blocks to check consistency and support
-                    stronger confidence.
+                    240 target attempts plus 15 tracking runs (five minutes total) · about 10–15
+                    minutes. Each setting returns in every block, with candidate order shuffled
+                    between blocks to check consistency and support stronger confidence.
                   </p>
                 </button>
                 <button
@@ -659,8 +741,9 @@ export default function Home() {
                   <span>03 / MOST ACCURATE</span>
                   <strong>Five randomized blocks</strong>
                   <p>
-                    400 target attempts · about 10–15 minutes. Five matched comparisons provide the
-                    strongest consistency check and the narrowest confidence estimate.
+                    400 target attempts plus 25 tracking runs (eight minutes 20 seconds total) ·
+                    about 18–25 minutes. Five matched comparisons provide the strongest consistency
+                    check and the narrowest confidence estimate.
                   </p>
                 </button>
               </div>
@@ -730,14 +813,14 @@ export default function Home() {
             </div>
             <div className="setup-foot">
               <span>
-                4 EXERCISES ·{' '}
-                {repetitions * modes.length * candidates(settings.sens).length * blockTotal} TARGETS
-                ·{' '}
+                {modes.length - 1} AIM EXERCISES ·{' '}
+                {repetitions * (modes.length - 1) * candidates(settings.sens).length * blockTotal}{' '}
+                TARGETS · {candidates(settings.sens).length * blockTotal} × 20 SEC TRACKING ·{' '}
                 {testLength === 'longest'
-                  ? 'ABOUT 10–15 MIN'
+                  ? 'ABOUT 18–25 MIN'
                   : testLength === 'long'
-                    ? 'ABOUT 5–10 MIN'
-                    : 'ABOUT 2–4 MIN'}
+                    ? 'ABOUT 10–15 MIN'
+                    : 'ABOUT 4–6 MIN'}
               </span>
               <button
                 className="button"
@@ -812,7 +895,9 @@ export default function Home() {
                     onHit={record}
                     onMiss={() => finishTargetRef.current(false)}
                     paused={paused}
-                    tracking={mode.id === 'tracking'}
+                    tracking={mode.id === 'tracking' || mode.id === 'tracking-duration'}
+                    trackingOnly={mode.id === 'tracking-duration'}
+                    onTrackingSample={recordTrackingSample}
                     sensitivity={sens}
                     dpi={settings.dpi}
                     rawCounts={rawCounts}
@@ -827,7 +912,10 @@ export default function Home() {
                 </div>
                 <div className="arena-hud">
                   <div>
-                    <span>EXERCISE {String(modeIndex + 1).padStart(2, '0')} / 04</span>
+                    <span>
+                      EXERCISE {String(modeIndex + 1).padStart(2, '0')} /{' '}
+                      {String(modes.length).padStart(2, '0')}
+                    </span>
                     <strong>{mode.name}</strong>
                   </div>
                   <div className="hud-right">
@@ -836,12 +924,23 @@ export default function Home() {
                       {testSens.length}
                     </span>
                     <strong>
-                      {count} <small>/ {mode.count}</small>
+                      {mode.id === 'tracking-duration' ? (
+                        <>
+                          00:{String(trackingRemaining).padStart(2, '0')} <small>REMAINING</small>
+                        </>
+                      ) : (
+                        <>
+                          {count} <small>/ {mode.count}</small>
+                        </>
+                      )}
                     </strong>
                   </div>
                 </div>
                 <div className="arena-help">
-                  <MousePointer2 size={14} /> CLICK ARENA TO CAPTURE MOUSE{' '}
+                  <MousePointer2 size={14} /> CLICK ARENA TO CAPTURE MOUSE ·{' '}
+                  {mode.id === 'tracking-duration'
+                    ? 'TRACK THE BALL, DO NOT CLICK'
+                    : 'CLICK TARGETS'}
                   <span>{rawCounts ? 'RAW INPUT' : 'ESTIMATED INPUT'} · ESC TO PAUSE</span>
                 </div>
                 {paused && (
@@ -857,7 +956,6 @@ export default function Home() {
                       onClick={() => {
                         setPaused(false);
                         setTrialStart(performance.now());
-                        missTimer.current = window.setTimeout(() => finishTarget(false), 2500);
                       }}
                     >
                       RESUME <Play size={15} />
