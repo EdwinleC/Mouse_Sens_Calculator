@@ -703,7 +703,7 @@ footer {
 .crosshair i,
 .crosshair b {
   position: absolute;
-  background: #fff;
+  background: var(--accent);
   display: block;
 }
 .crosshair i {
