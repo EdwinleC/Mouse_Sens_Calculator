@@ -88,10 +88,10 @@ function Target({
 }) {
   return (
     <mesh position={position}>
-      <sphereGeometry args={[size, 24, 24]} />
+      <sphereGeometry args={[size, 16, 16]} />
       <meshBasicMaterial color={color} />
       <mesh position={[0, 0, -0.03]} raycast={() => {}}>
-        <sphereGeometry args={[size * 1.5, 20, 20]} />
+        <sphereGeometry args={[size * 1.5, 12, 12]} />
         <meshBasicMaterial color={color} transparent opacity={0.12} />
       </mesh>
     </mesh>
@@ -157,16 +157,53 @@ function Scene({
   onRawInputChange: (raw: boolean) => void;
   angleRef: React.MutableRefObject<number>;
 }) {
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
   const targetRef = useRef<THREE.Group>(null);
   const trackingOrigin = useRef(new THREE.Vector3());
   const trackingElapsed = useRef(0);
   const trackingSampleElapsed = useRef(0);
   const trackingRaycaster = useRef(new THREE.Raycaster());
   const pendingMovement = useRef({ x: 0, y: 0 });
+  const renderRequested = useRef(false);
   const screenCenter = useMemo(() => new THREE.Vector2(0, 0), []);
+  const latest = useRef({
+    target,
+    paused,
+    tracking,
+    trackingOnly,
+    onHit,
+    onMiss,
+    onTrackingSample,
+    onPointerCaptured,
+    onPointerLockChange,
+    sensitivity,
+    dpi,
+    rawCounts,
+    onRawInputChange,
+  });
+  latest.current = {
+    target,
+    paused,
+    tracking,
+    trackingOnly,
+    onHit,
+    onMiss,
+    onTrackingSample,
+    onPointerCaptured,
+    onPointerLockChange,
+    sensitivity,
+    dpi,
+    rawCounts,
+    onRawInputChange,
+  };
   const applyPendingMovement = useCallback(() => {
-    if (paused) {
+    const {
+      paused: isPaused,
+      sensitivity: currentSens,
+      dpi: currentDpi,
+      rawCounts: useRawCounts,
+    } = latest.current;
+    if (isPaused) {
       pendingMovement.current.x = 0;
       pendingMovement.current.y = 0;
       return;
@@ -175,12 +212,13 @@ function Scene({
     if (x === 0 && y === 0) return;
     pendingMovement.current.x = 0;
     pendingMovement.current.y = 0;
-    const radiansPerInput = (degreesPerMouseInput(sensitivity, dpi, rawCounts) * Math.PI) / 180;
+    const radiansPerInput =
+      (degreesPerMouseInput(currentSens, currentDpi, useRawCounts) * Math.PI) / 180;
     const yawDelta = -x * radiansPerInput;
     angleRef.current += yawDelta;
     camera.rotation.y += yawDelta;
     camera.rotation.x = Math.max(-1.25, Math.min(1.25, camera.rotation.x - y * radiansPerInput));
-  }, [angleRef, camera, dpi, paused, rawCounts, sensitivity]);
+  }, [angleRef, camera]);
   useEffect(() => {
     camera.rotation.order = 'YXZ';
   }, [camera]);
@@ -193,13 +231,13 @@ function Scene({
       try {
         const result = c.requestPointerLock({ unadjustedMovement: true });
         Promise.resolve(result)
-          .then(() => onRawInputChange(true))
+          .then(() => latest.current.onRawInputChange(true))
           .catch(() => {
-            onRawInputChange(false);
+            latest.current.onRawInputChange(false);
             c.requestPointerLock?.();
           });
       } catch {
-        onRawInputChange(false);
+        latest.current.onRawInputChange(false);
         c.requestPointerLock?.();
       }
     };
@@ -209,20 +247,22 @@ function Scene({
         pendingMovement.current.x = 0;
         pendingMovement.current.y = 0;
       }
-      onPointerLockChange(locked);
-      if (locked) onPointerCaptured();
-      else onRawInputChange(false);
+      latest.current.onPointerLockChange(locked);
+      if (locked) latest.current.onPointerCaptured();
+      else latest.current.onRawInputChange(false);
+      invalidate();
     };
     const onMouseDown = (e: MouseEvent) => {
-      if (paused) return;
+      const state = latest.current;
+      if (state.paused) return;
       if (document.pointerLockElement !== c) {
         requestLock();
         return;
       }
-      if (trackingOnly) return;
+      if (state.trackingOnly) return;
       if (e.button !== 0) return;
-      if (!targetRef.current || !target) {
-        onMiss();
+      if (!targetRef.current || !state.target) {
+        state.onMiss();
         return;
       }
       applyPendingMovement();
@@ -231,14 +271,18 @@ function Scene({
       if (targetHits.length) {
         const targetCenter = targetRef.current.getWorldPosition(new THREE.Vector3());
         const centerOffset = raycaster.ray.distanceToPoint(targetCenter);
-        const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / target.size));
-        onHit(centerAccuracy);
-      } else onMiss();
+        const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / state.target.size));
+        state.onHit(centerAccuracy);
+      } else state.onMiss();
     };
     const onMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== c || paused) return;
+      if (document.pointerLockElement !== c || latest.current.paused) return;
       pendingMovement.current.x += e.movementX;
       pendingMovement.current.y += e.movementY;
+      if (!renderRequested.current) {
+        renderRequested.current = true;
+        invalidate();
+      }
     };
     c.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mousemove', onMove);
@@ -248,22 +292,7 @@ function Scene({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('pointerlockchange', onLockChange);
     };
-  }, [
-    camera,
-    paused,
-    sensitivity,
-    dpi,
-    rawCounts,
-    angleRef,
-    onHit,
-    onMiss,
-    onRawInputChange,
-    onPointerCaptured,
-    onPointerLockChange,
-    target,
-    trackingOnly,
-    applyPendingMovement,
-  ]);
+  }, [camera, invalidate, applyPendingMovement]);
   useEffect(() => {
     if (!target || !targetRef.current) return;
     const initial = new THREE.Vector3(...target.position)
@@ -273,23 +302,26 @@ function Scene({
     trackingOrigin.current.copy(initial);
     trackingElapsed.current = 0;
     trackingSampleElapsed.current = 0;
-  }, [target, camera]);
+    invalidate();
+  }, [target, camera, invalidate]);
   useFrame((_, delta) => {
+    renderRequested.current = false;
     applyPendingMovement();
-    if (targetRef.current && !paused && tracking) {
+    const state = latest.current;
+    if (targetRef.current && !state.paused && state.tracking) {
       trackingElapsed.current += delta;
       const elapsed = trackingElapsed.current;
       targetRef.current.position.x = trackingOrigin.current.x + Math.sin(elapsed * 1.25) * 1.4;
       targetRef.current.position.y = trackingOrigin.current.y + Math.sin(elapsed * 0.8) * 0.45;
-      if (trackingOnly) {
+      if (state.trackingOnly) {
         trackingSampleElapsed.current += delta;
         if (trackingSampleElapsed.current >= 0.1) {
           trackingSampleElapsed.current %= 0.1;
           trackingRaycaster.current.setFromCamera(screenCenter, camera);
           const targetCenter = targetRef.current.getWorldPosition(new THREE.Vector3());
           const centerOffset = trackingRaycaster.current.ray.distanceToPoint(targetCenter);
-          const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / (target?.size ?? 1)));
-          onTrackingSample(centerAccuracy);
+          const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / (state.target?.size ?? 1)));
+          state.onTrackingSample(centerAccuracy);
         }
       }
     }
@@ -298,9 +330,7 @@ function Scene({
     <>
       <color attach="background" args={['#101010']} />
       <fog attach="fog" args={['#101010', 13, 34]} />
-      <ambientLight intensity={0.8} />
-      <directionalLight position={[2, 4, 5]} intensity={1.2} />
-      <gridHelper args={[100, 60, '#252525', '#1c1c1c']} position={[0, -3, -2]} />
+      <gridHelper args={[100, 36, '#252525', '#1c1c1c']} position={[0, -3, -2]} />
       <mesh position={[0, 0, -12]}>
         <planeGeometry args={[200, 100]} />
         <meshBasicMaterial color="#111" />
@@ -1142,8 +1172,11 @@ export default function Home() {
                 <Canvas
                   className="arena-canvas"
                   camera={{ position: [0, 0, 0], fov: 75 }}
-                  dpr={[1, 1.25]}
-                  gl={{ powerPreference: 'high-performance' }}
+                  frameloop={
+                    mode.id === 'tracking' || mode.id === 'tracking-duration' ? 'always' : 'demand'
+                  }
+                  dpr={[1, 1.1]}
+                  gl={{ antialias: false, powerPreference: 'high-performance' }}
                 >
                   <Scene
                     target={target}
