@@ -41,6 +41,6 @@ createServer(async (request, response) => {
   } catch {
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
   }
-}).listen(port, '0.0.0.0', () => {
+}).listen(port, '127.0.0.1', () => {
   console.log(`SENS/LAB static export running at http://localhost:${port}`);
 });

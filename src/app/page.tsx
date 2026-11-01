@@ -655,11 +655,9 @@ export default function Home() {
     return {
       sens: screeningRow.sens,
       screeningScore: screeningRow.score,
-      screeningError: screeningRow.standardError,
       confirmationScore: confirmationRow?.score ?? null,
-      confirmationError: confirmationRow?.standardError ?? null,
-      exerciseScores: modes.map((exercise) =>
-        summarizeExercise(screeningTrials, exercise.id, screeningRow.sens).score,
+      exerciseScores: modes.map(
+        (exercise) => summarizeExercise(screeningTrials, exercise.id, screeningRow.sens).score,
       ),
     };
   });
@@ -736,7 +734,9 @@ export default function Home() {
       const link = document.createElement('a');
       link.href = pngUrl;
       link.download = `senslab-result-${fmt(result.sens, 2)}.png`;
+      document.body.appendChild(link);
       link.click();
+      link.remove();
       window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
       setCardActionMessage('Result card downloaded as a PNG.');
     } catch (error) {
@@ -1372,6 +1372,11 @@ export default function Home() {
                   role="img"
                   aria-label="SENS/LAB mouse sensitivity calibration result card"
                 >
+                  <title>SENS/LAB calibration result card</title>
+                  <desc>
+                    Recommended Counter-Strike 2 sensitivity, mouse settings, confidence, center
+                    accuracy, exercise scores, and sensitivity comparisons.
+                  </desc>
                   <defs>
                     <linearGradient id="card-glow" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0" stopColor="#172018" />
@@ -1668,7 +1673,7 @@ export default function Home() {
                     fontSize="15"
                     letterSpacing="2"
                   >
-                    SENSITIVITY FIELD · ALL CANDIDATES
+                    SENSITIVITY FIELD · SCORES OUT OF 100
                   </text>
                   <text
                     x="96"
@@ -1680,22 +1685,10 @@ export default function Home() {
                   >
                     SETTING
                   </text>
-                  <text
-                    x="300"
-                    y="1302"
-                    fill="#747a7a"
-                    fontFamily="monospace"
-                    fontSize="10"
-                  >
+                  <text x="300" y="1302" fill="#747a7a" fontFamily="monospace" fontSize="10">
                     SCREEN
                   </text>
-                  <text
-                    x="420"
-                    y="1302"
-                    fill="#747a7a"
-                    fontFamily="monospace"
-                    fontSize="10"
-                  >
+                  <text x="420" y="1302" fill="#747a7a" fontFamily="monospace" fontSize="10">
                     CONFIRM
                   </text>
                   {['H-FLICK', 'MICRO', 'WIDE', 'MOVING', '20S TRACK'].map((label, index) => (
@@ -1709,7 +1702,7 @@ export default function Home() {
                       fontSize="9"
                     >
                       {label}
-                  </text>
+                    </text>
                   ))}
                   {cardRankings.map((row, index) => {
                     const rowY = 1312 + index * 47;
