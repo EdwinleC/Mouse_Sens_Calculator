@@ -261,6 +261,120 @@ h2 em {
 .section {
   padding: 115px 10.5vw;
 }
+.calculator {
+  border-top: 1px solid #202020;
+  border-bottom: 1px solid #202020;
+  background: linear-gradient(110deg, #0b0b0b, #090909 55%, color-mix(in srgb, var(--accent) 4%, #090909));
+}
+.calculator-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 9vw;
+  align-items: center;
+  margin-top: 58px;
+}
+.calculator-copy h2 {
+  margin: 0 0 22px;
+  font-size: clamp(48px, 6.5vw, 86px);
+  font-weight: 500;
+  letter-spacing: -0.08em;
+  line-height: 0.9;
+}
+.calculator-copy h2 em {
+  color: #777;
+  font-style: normal;
+}
+.calculator-copy > p {
+  max-width: 440px;
+  color: #999;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.calculator-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 28px;
+  max-width: 490px;
+}
+.calculator-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: #888;
+  font:
+    9px 'DM Mono',
+    monospace;
+  letter-spacing: 0.08em;
+}
+.calculator-inputs input {
+  min-width: 0;
+  border: 1px solid #303030;
+  border-radius: 0;
+  background: #101010;
+  color: #f4f4f4;
+  padding: 13px;
+  font:
+    18px 'DM Mono',
+    monospace;
+}
+.calculator-output {
+  border: 1px solid #303030;
+  background: #0b0b0b;
+  padding: clamp(22px, 4vw, 38px);
+}
+.calculator-primary,
+.calculator-secondary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.calculator-primary > span,
+.calculator-secondary > span {
+  color: #888;
+  font:
+    9px 'DM Mono',
+    monospace;
+  letter-spacing: 0.1em;
+}
+.calculator-primary strong {
+  margin: 12px 0 6px;
+  color: var(--accent);
+  font:
+    clamp(42px, 6vw, 68px)/1 'DM Mono',
+    monospace;
+  letter-spacing: -0.08em;
+}
+.calculator-primary small,
+.calculator-note {
+  color: #696969;
+  font:
+    8px 'DM Mono',
+    monospace;
+  letter-spacing: 0.06em;
+}
+.calculator-secondary {
+  border-top: 1px solid #292929;
+  margin-top: 25px;
+  padding-top: 20px;
+}
+.calculator-secondary strong {
+  margin-top: 9px;
+  color: #eee;
+  font:
+    22px 'DM Mono',
+    monospace;
+}
+.calculator-output .button {
+  width: 100%;
+  margin-top: 25px;
+}
+.calculator-note {
+  display: block;
+  margin-top: 14px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
 .how {
   border-top: 1px solid #202020;
 }
@@ -1224,6 +1338,11 @@ footer {
   }
   .section {
     padding: 85px 8vw;
+  }
+  .calculator-layout {
+    grid-template-columns: 1fr;
+    gap: 38px;
+    margin-top: 42px;
   }
   .metrics {
     align-items: flex-start;

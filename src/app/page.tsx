@@ -450,6 +450,8 @@ export default function Home() {
     clearPersonalBests,
   } = useCalibration();
   const savedHistorySession = useRef<number | null>(null);
+  const [calculatorDpi, setCalculatorDpi] = useState('800');
+  const [calculatorSens, setCalculatorSens] = useState('1');
   const [theme, setTheme] = useState<Theme>('lime');
   useEffect(() => {
     const saved = localStorage.getItem('senslab-theme');
@@ -981,6 +983,15 @@ export default function Home() {
     }
   };
   const fmt = (n: number, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—');
+  const calculatorDpiValue = Number(calculatorDpi);
+  const calculatorSensValue = Number(calculatorSens);
+  const calculatorValid =
+    Number.isFinite(calculatorDpiValue) &&
+    calculatorDpiValue >= 100 &&
+    calculatorDpiValue <= 6400 &&
+    Number.isFinite(calculatorSensValue) &&
+    calculatorSensValue >= 0.01 &&
+    calculatorSensValue <= 20;
   return (
     <main data-theme={theme} style={{ '--accent': themeColors[theme] } as CSSProperties}>
       <header className="nav">
@@ -1093,6 +1104,75 @@ export default function Home() {
               </div>
               <div className="hero-index">
                 [ 45° 00′ 00″ ]<span>PRECISION IN / PERFORMANCE OUT</span>
+              </div>
+            </section>
+            <section className="calculator section" aria-labelledby="calculator-title">
+              <div className="section-heading">
+                <span>QUICK CALCULATOR</span>
+                <span>NO TEST REQUIRED</span>
+              </div>
+              <div className="calculator-layout">
+                <div className="calculator-copy">
+                  <h2 id="calculator-title">
+                    KNOW YOUR
+                    <br />
+                    <em>NUMBERS.</em>
+                  </h2>
+                  <p>
+                    Enter your current mouse settings to see your effective DPI and estimated
+                    mouse travel for a full 360° turn in CS2.
+                  </p>
+                  <div className="calculator-inputs">
+                    <label>
+                      MOUSE DPI
+                      <input
+                        type="number"
+                        min="100"
+                        max="6400"
+                        step="1"
+                        value={calculatorDpi}
+                        onChange={(event) => setCalculatorDpi(event.target.value)}
+                        aria-label="Mouse DPI for sensitivity calculator"
+                      />
+                    </label>
+                    <label>
+                      CS2 SENSITIVITY
+                      <input
+                        type="number"
+                        min="0.01"
+                        max="20"
+                        step="0.01"
+                        value={calculatorSens}
+                        onChange={(event) => setCalculatorSens(event.target.value)}
+                        aria-label="CS2 sensitivity for sensitivity calculator"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="calculator-output" aria-live="polite">
+                  <div className="calculator-primary">
+                    <span>EFFECTIVE DPI</span>
+                    <strong>{calculatorValid ? fmt(edpi(calculatorDpiValue, calculatorSensValue), 0) : '—'}</strong>
+                    <small>{calculatorValid ? `${calculatorDpiValue} DPI × ${fmt(calculatorSensValue, 2)} SENS` : 'ENTER DPI 100–6400 AND SENS 0.01–20'}</small>
+                  </div>
+                  <div className="calculator-secondary">
+                    <span>ESTIMATED CM / 360°</span>
+                    <strong>{calculatorValid ? `${fmt(cm360(calculatorDpiValue, calculatorSensValue), 1)} cm` : '—'}</strong>
+                  </div>
+                  <button
+                    className="button button-secondary"
+                    disabled={!calculatorValid}
+                    onClick={() => {
+                      setSettings({ ...settings, dpi: calculatorDpiValue, sens: calculatorSensValue });
+                      setDpiInput(String(calculatorDpiValue));
+                      setSensInput(String(calculatorSensValue));
+                      setView('setup');
+                    }}
+                  >
+                    USE THESE SETTINGS <ArrowUpRight size={14} />
+                  </button>
+                  <small className="calculator-note">CS2 default yaw 0.022 · Actual feel can vary with in-game settings and OS input.</small>
+                </div>
               </div>
             </section>
             <section id="how" className="how section">
