@@ -399,9 +399,6 @@ export default function Home() {
     setDpiInput(String(settings.dpi));
   }, [settings.dpi]);
   useEffect(() => {
-    setSensInput(String(settings.sens));
-  }, [settings.sens]);
-  useEffect(() => {
     setPollingInput(String(settings.polling));
   }, [settings.polling]);
   useEffect(() => {
@@ -1088,7 +1085,9 @@ export default function Home() {
                   max="20"
                   value={sensInput}
                   onChange={(e) => setSensInput(e.target.value)}
-                  onBlur={() => commitSetting('sens', sensInput, setSensInput, 0.01, 20)}
+                  onBlur={(e) =>
+                    commitSetting('sens', e.currentTarget.value, setSensInput, 0.01, 20)
+                  }
                   onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                 />
                 <small>Your current in-game sensitivity is the baseline.</small>
