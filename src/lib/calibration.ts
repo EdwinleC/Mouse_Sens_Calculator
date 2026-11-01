@@ -121,6 +121,7 @@ export function recommend(
       scoreGap: 0,
       confidenceInterval95: Infinity,
       clearWinner: false,
+      recommendationReason: 'No trial evidence; showing the baseline sensitivity.',
     };
   const runnerUp = ranked[1];
   const pairedDifferences = runnerUp
@@ -162,6 +163,17 @@ export function recommend(
     ranked.length >= (options.allowTwoCandidates ? 2 : 3) &&
     ranked.every((row) => row.n >= 40 && row.modes >= requiredModes && row.blocks >= 3);
   const confidence = !enough ? 'Low' : gap > ci95 ? 'High' : gap > ci95 * 0.5 ? 'Moderate' : 'Low';
+  const uncertaintyBand = Number.isFinite(ci95) ? Math.max(ci95, 0.01) : Infinity;
+  const statisticallySimilar = ranked.filter(
+    (row) => winner.score - row.score <= uncertaintyBand,
+  );
+  const stableChoice = statisticallySimilar.reduce((closest, row) =>
+    Math.abs(row.sens - base) < Math.abs(closest.sens - base) ? row : closest,
+  );
+  const recommendationReason =
+    stableChoice.sens === winner.sens
+      ? 'Highest-scoring tested sensitivity.'
+      : 'Scores were within the uncertainty range, so the recommendation stays closer to your baseline.';
   const confidenceReason = !enough
     ? 'More complete sensitivity blocks are needed before confidence can rise.'
     : gap > ci95
@@ -170,13 +182,14 @@ export function recommend(
         ? 'The leader is ahead, but the gap does not clear the 95% margin.'
         : 'The leading settings are too close or vary too much between blocks.';
   return {
-    sens: winner.sens,
+    sens: stableChoice.sens,
     confidence,
     winner,
     ranked,
     scoreGap: gap,
     confidenceInterval95: ci95,
     confidenceReason,
+    recommendationReason,
     clearWinner: enough && gap > ci95,
   };
 }

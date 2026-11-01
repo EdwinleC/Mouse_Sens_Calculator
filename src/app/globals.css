@@ -889,6 +889,13 @@ footer {
   font-size: 12px;
   margin: 25px 0 35px;
 }
+.recommendation-note {
+  max-width: 570px;
+  margin: -22px 0 28px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.6;
+}
 .result-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

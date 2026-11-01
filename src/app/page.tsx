@@ -523,7 +523,8 @@ export default function Home() {
     const scoredHit = hit && !timedTracking;
     window.clearTimeout(missTimer.current);
     const elapsed = performance.now() - trialStart;
-    const angular = (Math.atan2(target.position[0], 10) * 180) / Math.PI;
+    // Camera yaw is negative when turning toward a target on the right.
+    const angular = (-Math.atan2(target.position[0], 10) * 180) / Math.PI;
     const moved = angleRef.current - startAngle;
     const error = Math.abs(angular - moved);
     const wasOver =
@@ -1647,6 +1648,7 @@ export default function Home() {
                       : 'The block results were close or varied. Treat the leading setting as a range to explore, not a certain winner.'
                     : `Your recorded exercises favored ${fmt(result.sens, 2)} sensitivity. Keep your DPI at ${settings.dpi}; the recommendation changes in-game sensitivity only.`}
             </p>
+            <p className="recommendation-note">{result.recommendationReason}</p>
             <div className="result-grid">
               <article className="accuracy-card">
                 <span>CENTER ACCURACY</span>
