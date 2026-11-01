@@ -10,6 +10,7 @@ import {
   ArrowUpRight,
   Check,
   Copy,
+  Download,
   MousePointer2,
   Pause,
   Play,
@@ -22,6 +23,7 @@ import {
   degreesPerMouseInput,
   edpi,
   recommend,
+  score as trialScore,
   type Observation,
   type Trial,
 } from '@/lib/calibration';
@@ -54,6 +56,27 @@ const modes = [
     desc: 'Keep the crosshair on the moving ball. Do not click.',
   },
 ];
+
+function mean(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function summarizeExercise(trials: Trial[], modeId: string, sensitivity: number) {
+  const records = trials.filter((trial) => trial.mode === modeId && trial.sens === sensitivity);
+  const observations = records.flatMap((trial) => trial.observations ?? []);
+  const centerScores = observations.flatMap((observation) =>
+    typeof observation.centerAccuracy === 'number' ? [observation.centerAccuracy] : [],
+  );
+  const hits = records.reduce((sum, trial) => sum + trial.hits, 0);
+  const shots = records.reduce((sum, trial) => sum + trial.shots, 0);
+  return {
+    score: mean(records.map(trialScore)) ?? 0,
+    centerAccuracy: mean(centerScores),
+    hitRate: shots ? (hits / shots) * 100 : null,
+    averageTime: mean(records.flatMap((trial) => trial.times)),
+  };
+}
+
 function Target({
   position,
   size,
@@ -297,6 +320,7 @@ export default function Home() {
   const trackingSamplesRef = useRef<number[]>([]);
   const trackingRemainingRef = useRef(20_000);
   const awaitingCaptureRef = useRef(false);
+  const resultCardRef = useRef<SVGSVGElement>(null);
   const [view, setView] = useState<View>('home'),
     [testLength, setTestLength] = useState<'quick' | 'long' | 'longest'>('quick'),
     [confirmationRun, setConfirmationRun] = useState(false),
@@ -312,6 +336,8 @@ export default function Home() {
     [waitingForCapture, setWaitingForCapture] = useState(false),
     [pointerLocked, setPointerLocked] = useState(false),
     [trackingRemaining, setTrackingRemaining] = useState(20),
+    [completedAt, setCompletedAt] = useState<Date | null>(null),
+    [cardActionMessage, setCardActionMessage] = useState(''),
     [rawCounts, setRawCounts] = useState(false),
     [count, setCount] = useState(0),
     [trialStart, setTrialStart] = useState(0),
@@ -424,6 +450,7 @@ export default function Home() {
           window.setTimeout(() => spawnRef.current(), 200);
         } else {
           document.exitPointerLock?.();
+          setCompletedAt(new Date());
           setView('results');
         }
       } else window.setTimeout(() => spawnRef.current(), 200);
@@ -542,6 +569,8 @@ export default function Home() {
     trackingSamplesRef.current = [];
     trackingRemainingRef.current = 20_000;
     setTrackingRemaining(20);
+    setCompletedAt(null);
+    setCardActionMessage('');
     angleRef.current = 0;
     setTrialStart(0);
     setView('trainer');
@@ -611,6 +640,58 @@ export default function Home() {
     });
     return scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
   }, [analysisTrials]);
+  const screeningTrials = useMemo(
+    () => trials.filter((trial) => trial.phase !== 'confirmation'),
+    [trials],
+  );
+  const screeningResult = useMemo(
+    () => recommend(screeningTrials, settings.sens),
+    [screeningTrials, settings.sens],
+  );
+  const cardRankings = screeningResult.ranked.map((screeningRow) => {
+    const confirmationRow = confirmationRun
+      ? result.ranked.find((row) => row.sens === screeningRow.sens)
+      : undefined;
+    return {
+      sens: screeningRow.sens,
+      screeningScore: screeningRow.score,
+      screeningError: screeningRow.standardError,
+      confirmationScore: confirmationRow?.score ?? null,
+      confirmationError: confirmationRow?.standardError ?? null,
+      exerciseScores: modes.map((exercise) =>
+        summarizeExercise(screeningTrials, exercise.id, screeningRow.sens).score,
+      ),
+    };
+  });
+  const exerciseCardData = modes.map((exercise) => ({
+    ...exercise,
+    screening: summarizeExercise(screeningTrials, exercise.id, result.sens),
+    confirmation: confirmationRun
+      ? summarizeExercise(analysisTrials, exercise.id, result.sens)
+      : null,
+  }));
+  const cardAccuracy = useMemo(() => {
+    const trialScores = trials.flatMap((trial) => {
+      const scores = (trial.observations ?? []).flatMap((observation) =>
+        typeof observation.centerAccuracy === 'number' ? [observation.centerAccuracy] : [],
+      );
+      const trialScoreMean = mean(scores);
+      return trialScoreMean === null ? [] : [trialScoreMean];
+    });
+    return mean(trialScores);
+  }, [trials]);
+  const cardObservationCount = trials.reduce(
+    (sum, trial) => sum + (trial.observations?.length ?? trial.shots),
+    0,
+  );
+  const cardTestLabel = confirmationRun
+    ? 'SCREENING + TOP-TWO CONFIRMATION'
+    : `${testLength === 'quick' ? 'QUICK' : testLength === 'long' ? 'LONGER' : 'MOST ACCURATE'} TEST`;
+  const cardDate = completedAt?.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
   const observedTargets = analysisTrials.reduce(
     (total, trial) => total + (trial.observations?.length ?? trial.shots),
     0,
@@ -619,6 +700,61 @@ export default function Home() {
     await navigator.clipboard?.writeText(`sensitivity ${result.sens}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
+  };
+  const createResultCardPng = async () => {
+    if (!resultCardRef.current) throw new Error('The result card is not ready yet.');
+    const source = new XMLSerializer().serializeToString(resultCardRef.current);
+    const svgBlob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    try {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error('The result card image could not be rendered.'));
+        image.src = svgUrl;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = 2400;
+      canvas.height = 3280;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('This browser cannot render the result card.');
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error('PNG export failed.'))),
+          'image/png',
+        );
+      });
+    } finally {
+      URL.revokeObjectURL(svgUrl);
+    }
+  };
+  const downloadResultCard = async () => {
+    try {
+      const png = await createResultCardPng();
+      const pngUrl = URL.createObjectURL(png);
+      const link = document.createElement('a');
+      link.href = pngUrl;
+      link.download = `senslab-result-${fmt(result.sens, 2)}.png`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
+      setCardActionMessage('Result card downloaded as a PNG.');
+    } catch (error) {
+      setCardActionMessage(error instanceof Error ? error.message : 'Could not export the card.');
+    }
+  };
+  const copyResultCard = async () => {
+    if (!navigator.clipboard?.write || !('ClipboardItem' in window)) {
+      setCardActionMessage('Image copy is unavailable in this browser. Download the PNG instead.');
+      return;
+    }
+    try {
+      const png = await createResultCardPng();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      setCardActionMessage('Result card copied as an image.');
+    } catch (error) {
+      setCardActionMessage(error instanceof Error ? error.message : 'Could not copy the card.');
+    }
   };
   const fmt = (n: number, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—');
   return (
@@ -1218,6 +1354,456 @@ export default function Home() {
                 ))}
               </article>
             </div>
+            <section className="share-card-section">
+              <div className="share-card-heading">
+                <div>
+                  <span>YOUR SESSION, IN ONE IMAGE</span>
+                  <p>All tested settings, exercise scores, and your final result.</p>
+                </div>
+                <span>PNG · 2400 × 3280</span>
+              </div>
+              <div className="share-card-preview">
+                <svg
+                  ref={resultCardRef}
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1200"
+                  height="1640"
+                  viewBox="0 0 1200 1640"
+                  role="img"
+                  aria-label="SENS/LAB mouse sensitivity calibration result card"
+                >
+                  <defs>
+                    <linearGradient id="card-glow" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stopColor="#172018" />
+                      <stop offset="1" stopColor="#0a0a0a" />
+                    </linearGradient>
+                    <linearGradient id="card-bar" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0" stopColor="#d7ff4f" />
+                      <stop offset="1" stopColor="#f4f4f4" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="1200" height="1640" fill="#080909" />
+                  <rect
+                    x="22"
+                    y="22"
+                    width="1156"
+                    height="1596"
+                    rx="22"
+                    fill="none"
+                    stroke="#333638"
+                    strokeWidth="2"
+                  />
+                  <circle cx="1030" cy="200" r="176" fill="url(#card-glow)" />
+                  <path d="M72 145H1128" stroke="#343638" />
+                  <text
+                    x="72"
+                    y="101"
+                    fill="#f3f3f3"
+                    fontFamily="Arial, sans-serif"
+                    fontSize="37"
+                    fontWeight="700"
+                    letterSpacing="4"
+                  >
+                    SENS<tspan fill="#d7ff4f">/</tspan>LAB
+                  </text>
+                  <text
+                    x="1128"
+                    y="79"
+                    textAnchor="end"
+                    fill="#96999a"
+                    fontFamily="monospace"
+                    fontSize="15"
+                    letterSpacing="2"
+                  >
+                    MOUSE SENSITIVITY REPORT
+                  </text>
+                  <text
+                    x="1128"
+                    y="108"
+                    textAnchor="end"
+                    fill="#d7ff4f"
+                    fontFamily="monospace"
+                    fontSize="14"
+                    letterSpacing="1"
+                  >
+                    {cardTestLabel} · {cardDate ?? 'BROWSER CALIBRATION'}
+                  </text>
+
+                  <text
+                    x="74"
+                    y="219"
+                    fill="#929596"
+                    fontFamily="monospace"
+                    fontSize="15"
+                    letterSpacing="3"
+                  >
+                    RECOMMENDED CS2 SENSITIVITY
+                  </text>
+                  <text
+                    x="60"
+                    y="366"
+                    fill="#f4f4f4"
+                    fontFamily="monospace"
+                    fontSize="142"
+                    fontWeight="500"
+                    letterSpacing="-12"
+                  >
+                    {fmt(result.sens, 2)}
+                  </text>
+                  <text
+                    x="80"
+                    y="410"
+                    fill="#a8abab"
+                    fontFamily="monospace"
+                    fontSize="17"
+                    letterSpacing="1"
+                  >
+                    {settings.dpi} DPI <tspan fill="#d7ff4f">·</tspan>{' '}
+                    {fmt(edpi(settings.dpi, result.sens), 0)} eDPI <tspan fill="#d7ff4f">·</tspan>{' '}
+                    {fmt(cm360(settings.dpi, result.sens), 1)} cm / 360°
+                  </text>
+
+                  {[
+                    { label: 'MOUSE DPI', value: `${settings.dpi}` },
+                    { label: 'EFFECTIVE DPI', value: `${fmt(edpi(settings.dpi, result.sens), 0)}` },
+                    {
+                      label: 'EST. CM / 360°',
+                      value: `${fmt(cm360(settings.dpi, result.sens), 1)} cm`,
+                    },
+                  ].map((metric, index) => {
+                    const x = 72 + index * 358;
+                    return (
+                      <g key={metric.label}>
+                        <rect
+                          x={x}
+                          y="452"
+                          width="338"
+                          height="137"
+                          rx="7"
+                          fill="#111313"
+                          stroke="#303435"
+                        />
+                        <text
+                          x={x + 20}
+                          y="489"
+                          fill="#929596"
+                          fontFamily="monospace"
+                          fontSize="13"
+                          letterSpacing="2"
+                        >
+                          {metric.label}
+                        </text>
+                        <text
+                          x={x + 20}
+                          y="550"
+                          fill="#f1f1f1"
+                          fontFamily="monospace"
+                          fontSize="36"
+                        >
+                          {metric.value}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  <text
+                    x="74"
+                    y="658"
+                    fill="#929596"
+                    fontFamily="monospace"
+                    fontSize="14"
+                    letterSpacing="2"
+                  >
+                    CENTER ACCURACY
+                  </text>
+                  <text
+                    x="67"
+                    y="760"
+                    fill="#f3f3f3"
+                    fontFamily="monospace"
+                    fontSize="88"
+                    letterSpacing="-7"
+                  >
+                    {cardAccuracy === null ? '—' : `${Math.round(cardAccuracy)}`}
+                    <tspan fill="#929596" fontSize="30" letterSpacing="0">
+                      {' '}
+                      / 100
+                    </tspan>
+                  </text>
+                  <rect x="74" y="785" width="535" height="5" rx="2" fill="#292d2d" />
+                  <rect
+                    x="74"
+                    y="785"
+                    width={535 * ((cardAccuracy ?? 0) / 100)}
+                    height="5"
+                    rx="2"
+                    fill="url(#card-bar)"
+                  />
+                  <path d="M665 644V804" stroke="#333738" />
+                  <text
+                    x="714"
+                    y="664"
+                    fill="#929596"
+                    fontFamily="monospace"
+                    fontSize="14"
+                    letterSpacing="2"
+                  >
+                    CONFIDENCE
+                  </text>
+                  <text
+                    x="714"
+                    y="713"
+                    fill="#d7ff4f"
+                    fontFamily="monospace"
+                    fontSize="34"
+                    fontWeight="700"
+                    letterSpacing="1"
+                  >
+                    {result.confidence.toUpperCase()}
+                  </text>
+                  <text x="714" y="753" fill="#c4c7c7" fontFamily="monospace" fontSize="14">
+                    GAP {(result.scoreGap * 100).toFixed(1)} PTS
+                    <tspan fill="#626767"> · </tspan>
+                    95% ±
+                    {Number.isFinite(result.confidenceInterval95)
+                      ? (result.confidenceInterval95 * 100).toFixed(1)
+                      : '—'}{' '}
+                    PTS
+                  </text>
+                  <text x="714" y="783" fill="#7f8585" fontFamily="monospace" fontSize="13">
+                    {screeningResult.winner?.blocks ?? blockTotal} SCREEN BLOCKS
+                    {confirmationRun ? ` · ${result.winner?.blocks ?? 0} CONFIRM BLOCKS` : ''}
+                    {' · '}
+                    {cardObservationCount} OBSERVATIONS
+                  </text>
+
+                  <path d="M72 834H1128" stroke="#343638" />
+                  <text
+                    x="74"
+                    y="875"
+                    fill="#f0f0f0"
+                    fontFamily="monospace"
+                    fontSize="15"
+                    letterSpacing="2"
+                  >
+                    EXERCISE BREAKDOWN · RECOMMENDED SETTING
+                  </text>
+                  {exerciseCardData.map((exercise, index) => {
+                    const current = exercise.confirmation ?? exercise.screening;
+                    const rowY = 895 + index * 61;
+                    const scorePercent = Math.round(current.score * 100);
+                    const detail =
+                      exercise.id === 'tracking-duration'
+                        ? `20 SEC TRACK · CENTER ${current.centerAccuracy === null ? '—' : Math.round(current.centerAccuracy)}/100`
+                        : `HIT ${current.hitRate === null ? '—' : `${Math.round(current.hitRate)}%`} · CENTER ${current.centerAccuracy === null ? '—' : Math.round(current.centerAccuracy)} · ${current.averageTime === null ? '—' : `${Math.round(current.averageTime)} MS`}`;
+                    return (
+                      <g key={exercise.id}>
+                        <rect
+                          x="72"
+                          y={rowY}
+                          width="1056"
+                          height="52"
+                          rx="5"
+                          fill="#111313"
+                          stroke="#2b2f2f"
+                        />
+                        <text
+                          x="91"
+                          y={rowY + 32}
+                          fill="#747a7a"
+                          fontFamily="monospace"
+                          fontSize="13"
+                        >
+                          {String(index + 1).padStart(2, '0')}
+                        </text>
+                        <text
+                          x="132"
+                          y={rowY + 32}
+                          fill="#ededed"
+                          fontFamily="Arial, sans-serif"
+                          fontSize="16"
+                        >
+                          {exercise.name}
+                        </text>
+                        <text
+                          x="604"
+                          y={rowY + 33}
+                          textAnchor="end"
+                          fill="#f3f3f3"
+                          fontFamily="monospace"
+                          fontSize="18"
+                        >
+                          {scorePercent}
+                        </text>
+                        <rect x="625" y={rowY + 23} width="145" height="5" rx="2" fill="#292d2d" />
+                        <rect
+                          x="625"
+                          y={rowY + 23}
+                          width={145 * current.score}
+                          height="5"
+                          rx="2"
+                          fill="url(#card-bar)"
+                        />
+                        <text
+                          x="796"
+                          y={rowY + 31}
+                          fill="#9ba0a0"
+                          fontFamily="monospace"
+                          fontSize="12"
+                        >
+                          {confirmationRun
+                            ? `SCREEN ${Math.round(exercise.screening.score * 100)} → CONFIRM ${scorePercent}`
+                            : detail}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  <path d="M72 1224H1128" stroke="#343638" />
+                  <text
+                    x="74"
+                    y="1264"
+                    fill="#f0f0f0"
+                    fontFamily="monospace"
+                    fontSize="15"
+                    letterSpacing="2"
+                  >
+                    SENSITIVITY FIELD · ALL CANDIDATES
+                  </text>
+                  <text
+                    x="96"
+                    y="1302"
+                    fill="#747a7a"
+                    fontFamily="monospace"
+                    fontSize="11"
+                    letterSpacing="1"
+                  >
+                    SETTING
+                  </text>
+                  <text
+                    x="300"
+                    y="1302"
+                    fill="#747a7a"
+                    fontFamily="monospace"
+                    fontSize="10"
+                  >
+                    SCREEN
+                  </text>
+                  <text
+                    x="420"
+                    y="1302"
+                    fill="#747a7a"
+                    fontFamily="monospace"
+                    fontSize="10"
+                  >
+                    CONFIRM
+                  </text>
+                  {['H-FLICK', 'MICRO', 'WIDE', 'MOVING', '20S TRACK'].map((label, index) => (
+                    <text
+                      key={label}
+                      x={565 + index * 110}
+                      y="1302"
+                      textAnchor="middle"
+                      fill="#747a7a"
+                      fontFamily="monospace"
+                      fontSize="9"
+                    >
+                      {label}
+                  </text>
+                  ))}
+                  {cardRankings.map((row, index) => {
+                    const rowY = 1312 + index * 47;
+                    const recommended = row.sens === result.sens;
+                    return (
+                      <g key={row.sens}>
+                        <rect
+                          x="72"
+                          y={rowY}
+                          width="1056"
+                          height="39"
+                          rx="4"
+                          fill={recommended ? '#171c12' : '#101212'}
+                          stroke={recommended ? '#718b30' : '#252929'}
+                        />
+                        <text
+                          x="96"
+                          y={rowY + 25}
+                          fill={recommended ? '#d7ff4f' : '#e2e4e4'}
+                          fontFamily="monospace"
+                          fontSize="15"
+                        >
+                          {fmt(row.sens, 2)}
+                          {recommended ? '  ·  RECOMMENDED' : ''}
+                        </text>
+                        <text
+                          x="300"
+                          y={rowY + 25}
+                          fill="#dfe1e1"
+                          fontFamily="monospace"
+                          fontSize="13"
+                        >
+                          {Math.round(row.screeningScore * 100)}
+                        </text>
+                        <text
+                          x="420"
+                          y={rowY + 25}
+                          fill={row.confirmationScore === null ? '#626767' : '#d7ff4f'}
+                          fontFamily="monospace"
+                          fontSize="13"
+                        >
+                          {row.confirmationScore === null
+                            ? '—'
+                            : `${Math.round(row.confirmationScore * 100)}`}
+                        </text>
+                        {row.exerciseScores.map((exerciseScore, exerciseIndex) => (
+                          <text
+                            key={exerciseIndex}
+                            x={565 + exerciseIndex * 110}
+                            y={rowY + 25}
+                            textAnchor="middle"
+                            fill={recommended ? '#d7ff4f' : '#b9bdbd'}
+                            fontFamily="monospace"
+                            fontSize="13"
+                          >
+                            {Math.round(exerciseScore * 100)}
+                          </text>
+                        ))}
+                      </g>
+                    );
+                  })}
+                  <path d="M72 1571H1128" stroke="#343638" />
+                  <text
+                    x="74"
+                    y="1606"
+                    fill="#747a7a"
+                    fontFamily="monospace"
+                    fontSize="12"
+                    letterSpacing="1"
+                  >
+                    BROWSER AIM ESTIMATE · DPI HELD CONSTANT · SENS/LAB
+                  </text>
+                  <text
+                    x="1128"
+                    y="1606"
+                    textAnchor="end"
+                    fill="#d7ff4f"
+                    fontFamily="monospace"
+                    fontSize="12"
+                  >
+                    {cardDate ?? ''}
+                  </text>
+                </svg>
+              </div>
+              <div className="share-card-actions">
+                <button className="button" onClick={downloadResultCard}>
+                  <Download size={15} /> DOWNLOAD RESULT PNG
+                </button>
+                <button className="button button-secondary" onClick={copyResultCard}>
+                  <Copy size={15} /> COPY CARD IMAGE
+                </button>
+              </div>
+              {cardActionMessage && <p className="card-action-message">{cardActionMessage}</p>}
+            </section>
             <div className="result-actions">
               {!confirmationRun && result.ranked.length >= 2 && result.confidence !== 'High' && (
                 <button className="button button-secondary" onClick={startConfirmation}>
