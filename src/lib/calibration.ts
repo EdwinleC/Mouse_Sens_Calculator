@@ -28,6 +28,7 @@ export type Trial = {
   mode: string;
   side?: 'left' | 'right';
   block?: number;
+  phase?: 'screening' | 'confirmation';
   observations?: Observation[];
 };
 export function candidates(base: number): number[] {
@@ -61,7 +62,11 @@ export function score(t: Trial): number {
   const overshoot = Math.max(0, 1 - t.overshoots / Math.max(1, t.shots));
   return 0.35 * accuracy + 0.2 * speed + 0.2 * error + 0.15 * correction + 0.1 * overshoot;
 }
-export function recommend(trials: Trial[], base: number) {
+export function recommend(
+  trials: Trial[],
+  base: number,
+  options: { allowTwoCandidates?: boolean } = {},
+) {
   const groups = new Map<number, Trial[]>();
   for (const t of trials) {
     const a = groups.get(t.sens) || [];
@@ -133,15 +138,17 @@ export function recommend(trials: Trial[], base: number) {
         (pairedDifferences.length - 1)
       : 0;
   const criticalValue =
-    pairedDifferences.length === 3
-      ? 4.303
-      : pairedDifferences.length === 4
-        ? 3.182
-        : pairedDifferences.length === 5
-          ? 2.776
-          : pairedDifferences.length === 2
-            ? 12.706
-            : 1.96;
+    pairedDifferences.length === 6
+      ? 2.571
+      : pairedDifferences.length === 3
+        ? 4.303
+        : pairedDifferences.length === 4
+          ? 3.182
+          : pairedDifferences.length === 5
+            ? 2.776
+            : pairedDifferences.length === 2
+              ? 12.706
+              : 1.96;
   const ci95 = runnerUp
     ? pairedDifferences.length > 1
       ? criticalValue * Math.sqrt(pairedVariance / pairedDifferences.length)
@@ -152,9 +159,16 @@ export function recommend(trials: Trial[], base: number) {
     winner.n >= 40 &&
     winner.modes >= requiredModes &&
     winner.blocks >= 3 &&
-    ranked.length >= 3 &&
+    ranked.length >= (options.allowTwoCandidates ? 2 : 3) &&
     ranked.every((row) => row.n >= 40 && row.modes >= requiredModes && row.blocks >= 3);
   const confidence = !enough ? 'Low' : gap > ci95 ? 'High' : gap > ci95 * 0.5 ? 'Moderate' : 'Low';
+  const confidenceReason = !enough
+    ? 'More complete sensitivity blocks are needed before confidence can rise.'
+    : gap > ci95
+      ? 'The leading sensitivity clears the 95% score-gap margin.'
+      : gap > ci95 * 0.5
+        ? 'The leader is ahead, but the gap does not clear the 95% margin.'
+        : 'The leading settings are too close or vary too much between blocks.';
   return {
     sens: winner.sens,
     confidence,
@@ -162,6 +176,7 @@ export function recommend(trials: Trial[], base: number) {
     ranked,
     scoreGap: gap,
     confidenceInterval95: ci95,
+    confidenceReason,
     clearWinner: enough && gap > ci95,
   };
 }

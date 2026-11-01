@@ -28,6 +28,21 @@ import {
 import { useCalibration } from '@/lib/store';
 
 type View = 'home' | 'setup' | 'trainer' | 'results';
+function shuffle<T>(items: T[]) {
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function orderForBlock<T>(pool: T[], block: number) {
+  if (!pool.length) return [];
+  const offset = block % pool.length;
+  return [...pool.slice(offset), ...pool.slice(0, offset)];
+}
+
 const modes = [
   { id: 'horizontal', name: 'HORIZONTAL FLICKS', desc: 'Alternating left and right.' },
   { id: 'micro', name: 'MICRO ADJUSTMENTS', desc: 'Small targets. Deliberate control.' },
@@ -96,6 +111,8 @@ function Scene({
   tracking,
   trackingOnly,
   onTrackingSample,
+  onPointerCaptured,
+  onPointerLockChange,
   sensitivity,
   dpi,
   rawCounts,
@@ -109,6 +126,8 @@ function Scene({
   tracking: boolean;
   trackingOnly: boolean;
   onTrackingSample: (centerAccuracy: number) => void;
+  onPointerCaptured: () => void;
+  onPointerLockChange: (locked: boolean) => void;
   sensitivity: number;
   dpi: number;
   rawCounts: boolean;
@@ -145,7 +164,10 @@ function Scene({
       }
     };
     const onLockChange = () => {
-      if (document.pointerLockElement !== c) onRawInputChange(false);
+      const locked = document.pointerLockElement === c;
+      onPointerLockChange(locked);
+      if (locked) onPointerCaptured();
+      else onRawInputChange(false);
     };
     const onMouseDown = (e: MouseEvent) => {
       if (paused) return;
@@ -197,6 +219,8 @@ function Scene({
     onHit,
     onMiss,
     onRawInputChange,
+    onPointerCaptured,
+    onPointerLockChange,
     target,
     trackingOnly,
   ]);
@@ -254,16 +278,21 @@ export default function Home() {
   const spawnRef = useRef<() => void>(() => {});
   const trackingSamplesRef = useRef<number[]>([]);
   const trackingRemainingRef = useRef(20_000);
+  const awaitingCaptureRef = useRef(false);
   const [view, setView] = useState<View>('home'),
     [testLength, setTestLength] = useState<'quick' | 'long' | 'longest'>('quick'),
+    [confirmationRun, setConfirmationRun] = useState(false),
     [blockIndex, setBlockIndex] = useState(0),
     [modeIndex, setModeIndex] = useState(0),
     [candidateIndex, setCandidateIndex] = useState(0),
+    [candidatePool, setCandidatePool] = useState<number[]>([]),
     [candidateOrder, setCandidateOrder] = useState<number[]>([]),
     [target, setTarget] = useState<{ position: [number, number, number]; size: number } | null>(
       null,
     ),
     [paused, setPaused] = useState(false),
+    [waitingForCapture, setWaitingForCapture] = useState(false),
+    [pointerLocked, setPointerLocked] = useState(false),
     [trackingRemaining, setTrackingRemaining] = useState(20),
     [rawCounts, setRawCounts] = useState(false),
     [count, setCount] = useState(0),
@@ -281,9 +310,20 @@ export default function Home() {
   const angleRef = useRef(0);
   const { settings, trials, setSettings, addTrial, clearTrials } = useCalibration();
   const sensList = useMemo(() => candidates(settings.sens), [settings.sens]);
-  const testSens = candidateOrder.length ? candidateOrder : sensList;
-  const blockTotal = testLength === 'quick' ? 1 : testLength === 'long' ? 3 : 5;
-  const repetitions = testLength === 'quick' ? 5 : 4;
+  const testSens =
+    candidateOrder.length > 0
+      ? candidateOrder
+      : candidatePool.length > 0
+        ? candidatePool
+        : sensList;
+  const blockTotal = confirmationRun
+    ? 6
+    : testLength === 'quick'
+      ? 1
+      : testLength === 'long'
+        ? 3
+        : 5;
+  const repetitions = confirmationRun ? 4 : testLength === 'quick' ? 5 : 4;
   const sens = testSens[candidateIndex] ?? settings.sens;
   const mode = {
     ...modes[modeIndex],
@@ -342,6 +382,7 @@ export default function Home() {
           undershoots: undershoots + (scoredHit && !isTracking && wasUnder ? 1 : 0),
           mode: mode.id,
           block: blockIndex,
+          phase: confirmationRun ? 'confirmation' : 'screening',
           observations: nextObservations,
         };
         addTrial(nextTrial);
@@ -356,13 +397,9 @@ export default function Home() {
           setCount(0);
           window.setTimeout(() => spawnRef.current(), 200);
         } else if (blockIndex < blockTotal - 1) {
-          const remaining = [...sensList.slice(1)];
-          for (let i = remaining.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
-          }
-          setCandidateOrder([sensList[0], ...remaining]);
-          setBlockIndex((i) => i + 1);
+          const nextBlock = blockIndex + 1;
+          setCandidateOrder(orderForBlock(candidatePool, nextBlock));
+          setBlockIndex(nextBlock);
           setCandidateIndex(0);
           setModeIndex(0);
           setCount(0);
@@ -379,6 +416,17 @@ export default function Home() {
   const recordTrackingSample = (centerAccuracy: number) => {
     trackingSamplesRef.current.push(centerAccuracy);
   };
+  const onPointerCaptured = () => {
+    setPointerLocked(true);
+    if (awaitingCaptureRef.current) {
+      awaitingCaptureRef.current = false;
+      setWaitingForCapture(false);
+      spawnRef.current();
+    } else {
+      setTrialStart(performance.now());
+    }
+  };
+  const onPointerLockChange = (locked: boolean) => setPointerLocked(locked);
   const spawn = () => {
     if (mode.id === 'tracking-duration') {
       trackingSamplesRef.current = [];
@@ -422,7 +470,7 @@ export default function Home() {
   };
   spawnRef.current = spawn;
   useEffect(() => {
-    if (view !== 'trainer' || paused || !target) return;
+    if (view !== 'trainer' || paused || !pointerLocked || !target) return;
     if (mode.id === 'tracking-duration') {
       const startedAt = performance.now();
       const startingRemaining = trackingRemainingRef.current;
@@ -449,19 +497,18 @@ export default function Home() {
     }
     missTimer.current = window.setTimeout(() => finishTargetRef.current(false), 2500);
     return () => window.clearTimeout(missTimer.current);
-  }, [view, paused, target, mode.id]);
+  }, [view, paused, pointerLocked, target, mode.id]);
   const unsupported = typeof window !== 'undefined' && !window.matchMedia('(pointer:fine)').matches;
-  const start = () => {
-    if (unsupported) {
-      setView('trainer');
-      return;
-    }
-    clearTrials();
-    setView('trainer');
+  const resetSession = (pool: number[], isConfirmation: boolean) => {
+    const randomizedPool = shuffle(pool);
+    setConfirmationRun(isConfirmation);
+    setCandidatePool(randomizedPool);
+    setCandidateOrder(orderForBlock(randomizedPool, 0));
     setModeIndex(0);
     setBlockIndex(0);
     setCandidateIndex(0);
     setCount(0);
+    setTarget(null);
     setHits(0);
     setShots(0);
     setErrors([]);
@@ -471,18 +518,33 @@ export default function Home() {
     setOvershoots(0);
     setUndershoots(0);
     setPaused(false);
-    const remaining = [...sensList.slice(1)];
-    for (let i = remaining.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+    setPointerLocked(false);
+    setWaitingForCapture(true);
+    awaitingCaptureRef.current = true;
+    trackingSamplesRef.current = [];
+    trackingRemainingRef.current = 20_000;
+    setTrackingRemaining(20);
+    angleRef.current = 0;
+    setTrialStart(0);
+    setView('trainer');
+  };
+  const start = () => {
+    if (unsupported) {
+      setView('trainer');
+      return;
     }
-    setCandidateOrder([sensList[0], ...remaining]);
-    window.setTimeout(() => spawnRef.current(), 150);
+    clearTrials();
+    resetSession(sensList, false);
   };
   useEffect(() => {
     if (view !== 'trainer') return;
     const onLockChange = () => {
-      if (document.pointerLockElement === null && !paused && document.visibilityState === 'visible')
+      if (
+        document.pointerLockElement === null &&
+        !paused &&
+        !awaitingCaptureRef.current &&
+        document.visibilityState === 'visible'
+      )
         setPaused(true);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -504,9 +566,24 @@ export default function Home() {
       window.removeEventListener('blur', onBlur);
     };
   }, [view, paused]);
-  const result = useMemo(() => recommend(trials, settings.sens), [trials, settings.sens]);
+  const analysisTrials = useMemo(
+    () => (confirmationRun ? trials.filter((trial) => trial.phase === 'confirmation') : trials),
+    [confirmationRun, trials],
+  );
+  const result = useMemo(
+    () =>
+      recommend(analysisTrials, settings.sens, {
+        allowTwoCandidates: confirmationRun,
+      }),
+    [analysisTrials, confirmationRun, settings.sens],
+  );
+  const startConfirmation = () => {
+    const topCandidates = result.ranked.slice(0, 2).map((row) => row.sens);
+    if (topCandidates.length < 2) return;
+    resetSession(topCandidates, true);
+  };
   const centerAccuracy = useMemo(() => {
-    const scores = trials.flatMap((trial) => {
+    const scores = analysisTrials.flatMap((trial) => {
       const observations = (trial.observations ?? []).flatMap((observation) =>
         typeof observation.centerAccuracy === 'number' ? [observation.centerAccuracy] : [],
       );
@@ -515,8 +592,8 @@ export default function Home() {
         : [];
     });
     return scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
-  }, [trials]);
-  const observedTargets = trials.reduce(
+  }, [analysisTrials]);
+  const observedTargets = analysisTrials.reduce(
     (total, trial) => total + (trial.observations?.length ?? trial.shots),
     0,
   );
@@ -874,7 +951,9 @@ export default function Home() {
                 SENS<span>/</span>LAB
               </button>
               <div>
-                <span className="eyebrow">SENSITIVITY {fmt(sens, 2)}</span>
+                <span className="eyebrow">
+                  {confirmationRun ? 'CONFIRMATION' : 'SENSITIVITY'} {fmt(sens, 2)}
+                </span>
                 <span className="muted">{mode.name}</span>
               </div>
               <button
@@ -915,6 +994,8 @@ export default function Home() {
                     tracking={mode.id === 'tracking' || mode.id === 'tracking-duration'}
                     trackingOnly={mode.id === 'tracking-duration'}
                     onTrackingSample={recordTrackingSample}
+                    onPointerCaptured={onPointerCaptured}
+                    onPointerLockChange={onPointerLockChange}
                     sensitivity={sens}
                     dpi={settings.dpi}
                     rawCounts={rawCounts}
@@ -960,6 +1041,12 @@ export default function Home() {
                     : 'CLICK TARGETS'}
                   <span>{rawCounts ? 'RAW INPUT' : 'ESTIMATED INPUT'} · ESC TO PAUSE</span>
                 </div>
+                {waitingForCapture && (
+                  <div className="capture-prompt">
+                    <span className="eyebrow">READY WHEN YOU ARE</span>
+                    <p>Click the arena to capture your mouse. The test starts after capture.</p>
+                  </div>
+                )}
                 {paused && (
                   <div className="pause-screen">
                     <span className="eyebrow">SESSION PAUSED</span>
@@ -1040,21 +1127,28 @@ export default function Home() {
                   {blockTotal} comparison block{blockTotal === 1 ? '' : 's'} ·{' '}
                   {result.ranked.length} sensitivities
                   <br />
+                  Score gap: {(result.scoreGap * 100).toFixed(1)} pts
+                  <br />
                   95% score-gap margin:{' '}
                   {Number.isFinite(result.confidenceInterval95)
                     ? `${(result.confidenceInterval95 * 100).toFixed(1)} pts`
                     : 'not yet estimable'}
                 </p>
+                <p className="confidence-reason">{result.confidenceReason}</p>
               </div>
             </div>
             <p className="result-copy">
-              {result.confidence === 'Insufficient data'
-                ? 'Not enough recorded trial data to make a recommendation.'
-                : result.confidence === 'Low'
-                  ? testLength === 'quick'
-                    ? 'This quick pass is a screening result. Run the longer test to check whether the leading sensitivity stays ahead across randomized blocks.'
-                    : 'The block results were close or varied. Treat the leading setting as a range to explore, not a certain winner.'
-                  : `Your recorded exercises favored ${fmt(result.sens, 2)} sensitivity. Keep your DPI at ${settings.dpi}; the recommendation changes in-game sensitivity only.`}
+              {confirmationRun
+                ? result.confidence === 'High'
+                  ? 'The six-block follow-up supports the leading setting in a fresh comparison of the two strongest candidates from your first test.'
+                  : 'The follow-up still found no clear winner between the two leading settings. Their scores are close or varied across blocks; try either in-game and keep the one that feels more controllable.'
+                : result.confidence === 'Insufficient data'
+                  ? 'Not enough recorded trial data to make a recommendation.'
+                  : result.confidence === 'Low'
+                    ? testLength === 'quick'
+                      ? 'This quick pass is a screening result. Run the longer test to check whether the leading sensitivity stays ahead across randomized blocks.'
+                      : 'The block results were close or varied. Treat the leading setting as a range to explore, not a certain winner.'
+                    : `Your recorded exercises favored ${fmt(result.sens, 2)} sensitivity. Keep your DPI at ${settings.dpi}; the recommendation changes in-game sensitivity only.`}
             </p>
             <div className="result-grid">
               <article className="accuracy-card">
@@ -1102,6 +1196,11 @@ export default function Home() {
               </article>
             </div>
             <div className="result-actions">
+              {!confirmationRun && result.ranked.length >= 2 && result.confidence !== 'High' && (
+                <button className="button button-secondary" onClick={startConfirmation}>
+                  <ArrowRight size={15} /> CONFIRM TOP TWO · 6 BLOCKS
+                </button>
+              )}
               <button className="button" onClick={copy}>
                 {copied ? <Check size={15} /> : <Copy size={15} />}{' '}
                 {copied ? 'COPIED' : 'COPY CS2 SETTINGS'}

@@ -571,6 +571,24 @@ footer {
   margin-left: 20px;
   color: #555;
 }
+.capture-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: #050505b8;
+  text-align: center;
+  pointer-events: none;
+}
+.capture-prompt p {
+  margin: 16px 20px 0;
+  color: #aaa;
+  font-size: 12px;
+  line-height: 1.7;
+}
 .progress-bars {
   height: 5px;
   display: flex;
@@ -658,6 +676,11 @@ footer {
   color: #777;
   font-size: 10px;
   line-height: 1.7;
+}
+.confidence p.confidence-reason {
+  max-width: 280px;
+  margin-top: 12px;
+  color: #aaa;
 }
 .result-copy {
   max-width: 570px;
