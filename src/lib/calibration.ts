@@ -8,6 +8,8 @@ export function degreesPerMouseInput(sens: number, dpi: number, rawCounts: boole
 export type Observation = {
   hit: boolean;
   timeMs: number;
+  /** Aim point proximity to the target center, from 0 to 100. */
+  centerAccuracy?: number;
   angularErrorDeg: number | null;
   corrections: number;
   overshot: boolean;

@@ -47,7 +47,7 @@ function Target({
     <mesh position={position}>
       <sphereGeometry args={[size, 24, 24]} />
       <meshBasicMaterial color={color} />
-      <mesh position={[0, 0, -0.03]}>
+      <mesh position={[0, 0, -0.03]} raycast={() => {}}>
         <sphereGeometry args={[size * 1.5, 20, 20]} />
         <meshBasicMaterial color={color} transparent opacity={0.12} />
       </mesh>
@@ -96,7 +96,7 @@ function Scene({
   angleRef,
 }: {
   target: { position: [number, number, number]; size: number } | null;
-  onHit: () => void;
+  onHit: (centerAccuracy: number) => void;
   onMiss: () => void;
   paused: boolean;
   tracking: boolean;
@@ -142,13 +142,18 @@ function Scene({
         return;
       }
       if (e.button !== 0) return;
-      if (!targetRef.current) {
+      if (!targetRef.current || !target) {
         onMiss();
         return;
       }
       raycaster.setFromCamera(center, camera);
-      if (raycaster.intersectObject(targetRef.current, true).length) onHit();
-      else onMiss();
+      const targetHits = raycaster.intersectObject(targetRef.current, true);
+      if (targetHits.length) {
+        const targetCenter = targetRef.current.getWorldPosition(new THREE.Vector3());
+        const centerOffset = raycaster.ray.distanceToPoint(targetCenter);
+        const centerAccuracy = Math.max(0, 100 * (1 - centerOffset / target.size));
+        onHit(centerAccuracy);
+      } else onMiss();
     };
     const onMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== c || paused) return;
@@ -169,7 +174,18 @@ function Scene({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('pointerlockchange', onLockChange);
     };
-  }, [camera, paused, sensitivity, dpi, rawCounts, angleRef, onHit, onMiss, onRawInputChange]);
+  }, [
+    camera,
+    paused,
+    sensitivity,
+    dpi,
+    rawCounts,
+    angleRef,
+    onHit,
+    onMiss,
+    onRawInputChange,
+    target,
+  ]);
   useEffect(() => {
     if (!target || !targetRef.current) return;
     const initial = new THREE.Vector3(...target.position)
@@ -207,7 +223,7 @@ function Scene({
 }
 export default function Home() {
   const missTimer = useRef<number | undefined>(undefined);
-  const finishTargetRef = useRef<(hit: boolean) => void>(() => {});
+  const finishTargetRef = useRef<(hit: boolean, centerAccuracy?: number) => void>(() => {});
   const spawnRef = useRef<() => void>(() => {});
   const [view, setView] = useState<View>('home'),
     [testLength, setTestLength] = useState<'quick' | 'long' | 'longest'>('quick'),
@@ -240,7 +256,7 @@ export default function Home() {
   const repetitions = testLength === 'quick' ? 5 : 4;
   const sens = testSens[candidateIndex] ?? settings.sens;
   const mode = { ...modes[modeIndex], count: repetitions };
-  const finishTarget = (hit: boolean) => {
+  const finishTarget = (hit: boolean, centerAccuracy = 0) => {
     if (paused || !target) return;
     window.clearTimeout(missTimer.current);
     const elapsed = performance.now() - trialStart;
@@ -254,6 +270,7 @@ export default function Home() {
     const observation: Observation = {
       hit,
       timeMs: elapsed,
+      centerAccuracy: hit ? centerAccuracy : 0,
       angularErrorDeg: hit && mode.id !== 'tracking' ? error : null,
       corrections: hit && mode.id !== 'tracking' && error > 3 ? 1 : 0,
       overshot: hit && mode.id !== 'tracking' && wasOver,
@@ -321,7 +338,7 @@ export default function Home() {
     }, 260);
   };
   finishTargetRef.current = finishTarget;
-  const record = () => finishTargetRef.current(true);
+  const record = (centerAccuracy: number) => finishTargetRef.current(true, centerAccuracy);
   const spawn = () => {
     const seed = blockIndex * 1009 + modeIndex * 97 + count + 1;
     const random = (salt: number) => {
@@ -340,7 +357,14 @@ export default function Home() {
       (random(3) * 2 - 1) *
       (mode.id === 'micro' ? 0.35 : mode.id === 'tracking' ? 0.6 : mode.id === 'wide' ? 1.3 : 0.9);
     const scale = mode.id === 'micro' ? 0.22 : mode.id === 'wide' ? 1.15 : 0.55;
-    const pos: [number, number, number] = [targetX, targetY, -10];
+    const spawnDistance = Math.hypot(targetX, targetY);
+    const spawnAngle = Math.atan2(targetY, targetX);
+    const spawnRadius = Math.max(spawnDistance, 1.8);
+    const pos: [number, number, number] = [
+      Math.cos(spawnAngle) * spawnRadius,
+      Math.sin(spawnAngle) * spawnRadius,
+      -10,
+    ];
     setTarget({ position: pos, size: scale });
     setTrialStart(performance.now());
     setStartAngle(angleRef.current);
@@ -406,6 +430,14 @@ export default function Home() {
     };
   }, [view, paused]);
   const result = useMemo(() => recommend(trials, settings.sens), [trials, settings.sens]);
+  const centerAccuracy = useMemo(() => {
+    const scores = trials
+      .flatMap((trial) => trial.observations ?? [])
+      .flatMap((observation) =>
+        typeof observation.centerAccuracy === 'number' ? [observation.centerAccuracy] : [],
+      );
+    return scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
+  }, [trials]);
   const observedTargets = trials.reduce(
     (total, trial) => total + (trial.observations?.length ?? trial.shots),
     0,
@@ -910,6 +942,19 @@ export default function Home() {
                   : `Your recorded exercises favored ${fmt(result.sens, 2)} sensitivity. Keep your DPI at ${settings.dpi}; the recommendation changes in-game sensitivity only.`}
             </p>
             <div className="result-grid">
+              <article className="accuracy-card">
+                <span>CENTER ACCURACY</span>
+                <strong>
+                  {centerAccuracy === null ? '—' : `${Math.round(centerAccuracy)}/100`}
+                </strong>
+                <div className="accuracy-track">
+                  <i style={{ width: `${centerAccuracy ?? 0}%` }} />
+                </div>
+                <p>
+                  Average precision across attempts. Shots closer to each ball’s center score
+                  higher; misses score zero.
+                </p>
+              </article>
               <article>
                 <span>CURRENT VS RECOMMENDED</span>
                 <div className="compare">

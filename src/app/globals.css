@@ -675,6 +675,29 @@ footer {
   letter-spacing: 0.1em;
   color: #888;
 }
+.accuracy-card > strong {
+  display: block;
+  margin: 20px 0 14px;
+  font:
+    40px/1 'DM Mono',
+    monospace;
+  letter-spacing: -0.07em;
+}
+.accuracy-track {
+  height: 3px;
+  background: #272727;
+}
+.accuracy-track i {
+  display: block;
+  height: 100%;
+  background: #eee;
+}
+.accuracy-card p {
+  margin: 14px 0 0;
+  color: #888;
+  font-size: 10px;
+  line-height: 1.7;
+}
 .compare {
   display: flex;
   align-items: center;
