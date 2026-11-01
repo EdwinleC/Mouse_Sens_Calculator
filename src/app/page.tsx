@@ -641,6 +641,19 @@ export default function Home() {
                 <br />
                 <em>GUESSWORK.</em>
               </h2>
+              <p className="how-intro">
+                Start with your current CS2 sensitivity and DPI. SENS/LAB compares five nearby
+                settings—from 80% to 120% of your current sensitivity—while keeping your DPI fixed.
+                At each setting, you complete four aim exercises and a 20-second tracking run. We
+                score hit rate, speed, aim error, corrections, and how close you keep the crosshair
+                to the moving target; each exercise contributes equally to the comparison.
+                <br />
+                <br />
+                The highest-scoring setting is a data-backed starting point for your own practice,
+                not a promise of perfect aim. We also show eDPI (DPI × sensitivity) and estimated
+                cm/360° so you can understand how each setting changes your mouse movement. Your DPI
+                stays the same throughout.
+              </p>
               <div className="steps">
                 {[
                   [
@@ -648,7 +661,11 @@ export default function Home() {
                     'TEST',
                     'Complete four aim exercises and a 20-second no-click tracking run for each sensitivity.',
                   ],
-                  ['02', 'ANALYZE', 'We compare accuracy, speed, corrections and consistency.'],
+                  [
+                    '02',
+                    'ANALYZE',
+                    'We compare accuracy, speed, corrections and tracking control.',
+                  ],
                   ['03', 'OPTIMIZE', 'Get a sensitivity range backed by your recorded trials.'],
                 ].map(([n, t, d]) => (
                   <article key={n}>

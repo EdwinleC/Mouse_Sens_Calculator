@@ -251,7 +251,14 @@ h2 em {
   letter-spacing: -0.08em;
   line-height: 0.88;
   font-weight: 500;
-  margin: 55px 0 76px;
+  margin: 55px 0 28px;
+}
+.how-intro {
+  max-width: 760px;
+  margin: 0 0 58px;
+  color: #999;
+  font-size: 13px;
+  line-height: 1.9;
 }
 .steps {
   display: grid;
